@@ -171,7 +171,8 @@ def main():
             items = get_directories(current_path)  # Apenas os diretórios
 
             term_size = shutil.get_terminal_size((80, 24))
-            max_lines = max(3, min(10, term_size.lines - 2))
+            # Garante que seja compacto e inline logo abaixo da linha do prompt (máximo 8 subpastas para não ocupar a tela)
+            max_lines = max(3, min(8, term_size.lines - 4))
 
             if len(items) == 0:
                 selected_idx = 0
@@ -206,28 +207,34 @@ def main():
 
             # Monta linhas
             lines = []
+            max_name_len = max(10, term_size.columns - 8)
+
+            # Primeira linha: diretório atual exibido à esquerda (raiz)
+            curr_disp = current_path if len(current_path) <= max_name_len else "..." + current_path[-(max_name_len - 3):]
+            lines.append(f"\033[1;36m📁 {curr_disp}\033[0m")
+
             if not items:
-                lines.append("   \033[90m(nenhuma subpasta)\033[0m")
+                lines.append("     \033[90m(nenhuma subpasta)\033[0m")
             else:
                 if has_above:
                     count_above = scroll_offset
-                    lines.append(f"   \033[90m↑ +{count_above} acima...\033[0m")
+                    lines.append(f"     \033[90m↑ +{count_above} acima...\033[0m")
 
                 visible_items = items[scroll_offset:scroll_offset + available_for_items]
-                max_name_len = max(10, term_size.columns - 6)
                 for i, d in enumerate(visible_items):
                     actual_idx = scroll_offset + i
                     is_selected = (actual_idx == selected_idx)
-                    disp_name = d if len(d) <= max_name_len else d[:max_name_len - 3] + "..."
+                    sub_name_len = max(10, term_size.columns - 10)
+                    disp_name = d if len(d) <= sub_name_len else d[:sub_name_len - 3] + "..."
 
                     if is_selected:
-                        lines.append(f"\033[7m > {disp_name}/ \033[0m")
+                        lines.append(f"  \033[7m > {disp_name}/ \033[0m")
                     else:
-                        lines.append(f"    \033[1;34m{disp_name}/\033[0m")
+                        lines.append(f"     \033[1;34m{disp_name}/\033[0m")
 
                 if has_below:
                     count_below = len(items) - (scroll_offset + len(visible_items))
-                    lines.append(f"   \033[90m↓ +{count_below} mais...\033[0m")
+                    lines.append(f"     \033[90m↓ +{count_below} mais...\033[0m")
 
             render_lines(lines)
 
