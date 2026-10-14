@@ -87,7 +87,7 @@ Também é possível passar uma pasta inicial:
 cc ~/projects
 ```
 
-*(No Linux, os aliases `dir` e `gg` também ficam disponíveis para conveniência).*
+*(No Linux, o alias `dir` também fica disponível para conveniência).*
 
 ---
 

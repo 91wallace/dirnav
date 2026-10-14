@@ -45,7 +45,6 @@ function cc() {
     rm -f "$tmp"
 }
 alias dir=cc
-alias gg=cc
 '
 
 CONFIGURED=0

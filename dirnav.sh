@@ -13,6 +13,5 @@ function cc() {
     rm -f "$tmp"
 }
 
-# Aliases opcionais
+# Alias opcional
 alias dir=cc
-alias gg=cc
