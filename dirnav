@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+import os
+import sys
+import termios
+import tty
+import select
+import shutil
+
+def get_directories(path):
+    try:
+        entries = os.listdir(path)
+        dirs = [d for d in entries if os.path.isdir(os.path.join(path, d))]
+        dirs = [d for d in dirs if not d.startswith('.')]
+        return sorted(dirs, key=str.lower)
+    except Exception:
+        return []
+
+def read_key(fd):
+    b = os.read(fd, 1)
+    if not b:
+        return ''
+    if b == b'\x1b':
+        # Verifica se há mais bytes chegando (setas ANSI, etc.) sem travar no ESC isolado
+        r, _, _ = select.select([fd], [], [], 0.05)
+        if r:
+            rest = os.read(fd, 8)
+            seq = b + rest
+            if seq in (b'\x1b[A', b'\x1bOA'): return 'UP'
+            elif seq in (b'\x1b[B', b'\x1bOB'): return 'DOWN'
+            elif seq in (b'\x1b[C', b'\x1bOC'): return 'RIGHT'
+            elif seq in (b'\x1b[D', b'\x1bOD'): return 'LEFT'
+            elif seq in (b'\x1b[H', b'\x1b[1~'): return 'HOME'
+            elif seq in (b'\x1b[F', b'\x1b[4~'): return 'END'
+            elif seq == b'\x1b[5~': return 'PAGEUP'
+            elif seq == b'\x1b[6~': return 'PAGEDOWN'
+            return seq.decode('utf-8', errors='replace')
+        return 'ESC'
+    return b.decode('utf-8', errors='replace')
+
+def main():
+    if not sys.stdin.isatty():
+        sys.exit(1)
+
+    # Argumentos
+    cwd_file = None
+    start_path = None
+
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == '--cwd-file' and i + 1 < len(sys.argv):
+            cwd_file = sys.argv[i + 1]
+            i += 2
+        elif arg.startswith('--cwd-file='):
+            cwd_file = arg.split('=', 1)[1]
+            i += 1
+        elif os.path.isdir(arg):
+            start_path = os.path.abspath(arg)
+            i += 1
+        else:
+            i += 1
+
+    current_path = start_path if start_path else os.getcwd()
+
+    selected_idx = 0
+    scroll_offset = 0
+    cancelled = False
+    target_path = None
+
+    # Salva configurações do terminal
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    # Usa stderr para a interface gráfica ANSI
+    ui_out = sys.stderr
+    prev_line_count = 0
+
+    def render_lines(lines):
+        nonlocal prev_line_count
+        if not lines:
+            lines = ["\033[90m(nenhuma subpasta)\033[0m"]
+
+        out = []
+        # Se já renderizamos antes, move o cursor exatamente para a primeira linha
+        if prev_line_count > 0:
+            out.append(f"\033[{prev_line_count - 1}A\r")
+
+        # Renderiza cada linha; a última linha NÃO tem \r\n para evitar scroll no rodapé do terminal
+        for i, line in enumerate(lines):
+            if i < len(lines) - 1:
+                out.append(f"\033[2K{line}\r\n")
+            else:
+                out.append(f"\033[2K{line}")
+
+        # Se a lista anterior tinha mais linhas, limpa as linhas excedentes abaixo
+        if prev_line_count > len(lines):
+            diff = prev_line_count - len(lines)
+            for _ in range(diff):
+                out.append("\r\n\033[2K")
+            out.append(f"\033[{diff}A\r")
+
+        prev_line_count = len(lines)
+        ui_out.write("".join(out))
+        ui_out.flush()
+
+    def clear_ui():
+        nonlocal prev_line_count
+        if prev_line_count > 0:
+            out = []
+            if prev_line_count > 1:
+                out.append(f"\033[{prev_line_count - 1}A\r")
+            else:
+                out.append("\r")
+
+            for i in range(prev_line_count):
+                if i < prev_line_count - 1:
+                    out.append("\033[2K\r\n")
+                else:
+                    out.append("\033[2K")
+
+            if prev_line_count > 1:
+                out.append(f"\033[{prev_line_count - 1}A\r")
+            else:
+                out.append("\r")
+
+            out.append("\033[?25h")
+            ui_out.write("".join(out))
+            ui_out.flush()
+            prev_line_count = 0
+
+    try:
+        tty.setraw(fd)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        ui_out.write("\033[?25l")  # Esconde cursor
+        ui_out.flush()
+
+        while True:
+            items = get_directories(current_path)  # Apenas os diretórios
+
+            term_size = shutil.get_terminal_size((80, 24))
+            max_lines = max(3, min(10, term_size.lines - 2))
+
+            if len(items) == 0:
+                selected_idx = 0
+                scroll_offset = 0
+            else:
+                if selected_idx >= len(items):
+                    selected_idx = len(items) - 1
+                if selected_idx < 0:
+                    selected_idx = 0
+                if selected_idx < scroll_offset:
+                    scroll_offset = selected_idx
+                elif selected_idx >= scroll_offset + max_lines:
+                    scroll_offset = selected_idx - max_lines + 1
+
+            # Monta linhas (apenas os diretórios, sem cabeçalhos ou opções extras)
+            lines = []
+            if not items:
+                lines.append("   \033[90m(nenhuma subpasta)\033[0m")
+            else:
+                visible_items = items[scroll_offset:scroll_offset + max_lines]
+                max_name_len = max(10, term_size.columns - 6)
+                for i, d in enumerate(visible_items):
+                    actual_idx = scroll_offset + i
+                    is_selected = (actual_idx == selected_idx)
+                    disp_name = d if len(d) <= max_name_len else d[:max_name_len - 3] + "..."
+
+                    if is_selected:
+                        lines.append(f"\033[7m > {disp_name}/ \033[0m")
+                    else:
+                        lines.append(f"    \033[1;34m{disp_name}/\033[0m")
+
+            render_lines(lines)
+
+            # Lê tecla
+            key = read_key(fd)
+
+            if key in ('UP', 'k', 'K'):
+                if selected_idx > 0:
+                    selected_idx -= 1
+            elif key in ('DOWN', 'j', 'J'):
+                if selected_idx < len(items) - 1:
+                    selected_idx += 1
+            elif key in ('LEFT', 'h', 'H', '\x7f', '\b'):
+                # Seta para trás: volta um nível
+                parent = os.path.dirname(current_path)
+                if parent != current_path:
+                    current_path = parent
+                    selected_idx = 0
+                    scroll_offset = 0
+            elif key in ('RIGHT', 'l', 'L', '\r', '\n'):
+                # Seta para frente ou Enter: entra no diretório selecionado
+                if items and 0 <= selected_idx < len(items):
+                    new_path = os.path.join(current_path, items[selected_idx])
+                    if os.path.isdir(new_path):
+                        current_path = new_path
+                        selected_idx = 0
+                        scroll_offset = 0
+            elif key in ('q', 'Q'):
+                # 'q': fica no diretório atual
+                target_path = current_path
+                break
+            elif key in ('HOME',):
+                selected_idx = 0
+                scroll_offset = 0
+            elif key in ('END',):
+                if items:
+                    selected_idx = len(items) - 1
+            elif key in ('PAGEUP',):
+                selected_idx = max(0, selected_idx - max_lines)
+            elif key in ('PAGEDOWN',):
+                if items:
+                    selected_idx = min(len(items) - 1, selected_idx + max_lines)
+            elif key in ('ESC', '\x03'):
+                cancelled = True
+                break
+
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        clear_ui()
+
+        if not cancelled and target_path:
+            # 1. Se foi passado arquivo de saída (--cwd-file), grava nele
+            if cwd_file:
+                try:
+                    with open(cwd_file, 'w') as f:
+                        f.write(target_path)
+                except Exception:
+                    pass
+
+            # 2. Se stdout foi redirecionado (canal/subshell), imprime no stdout
+            if not sys.stdout.isatty():
+                print(target_path)
+            elif not cwd_file:
+                # Executado diretamente no terminal sem wrapper:
+                try:
+                    os.chdir(target_path)
+                    shell = os.environ.get("SHELL", "/bin/bash")
+                    os.execlp(shell, shell)
+                except Exception:
+                    print(target_path)
+
+if __name__ == '__main__':
+    main()
