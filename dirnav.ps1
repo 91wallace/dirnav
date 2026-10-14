@@ -1,4 +1,4 @@
-# Dirnav PowerShell 7 / Windows integration
+# Dirnav PowerShell integration
 function cc {
     param(
         [Parameter(Position=0, ValueFromRemainingArguments=$true)]
@@ -13,14 +13,14 @@ function cc {
             dirnav --cwd-file="$tmp"
         }
         if (Test-Path $tmp) {
-            $target = (Get-Content $tmp -Raw).Trim()
+            $target = (Get-Content $tmp -Raw -Encoding utf8).Trim()
             if ($target -and (Test-Path $target)) {
                 Set-Location $target
             }
         }
     } finally {
         if (Test-Path $tmp) {
-            Remove-Item $tmp -Force
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
     }
 }

@@ -48,28 +48,30 @@ chmod +x install.sh
 
 ---
 
-### Windows (PowerShell 7)
+### Windows (PowerShell 5.1 / PowerShell 7+)
 
-1. Baixe o script executável `dirnav` para uma pasta no seu `PATH` (ex: `C:\Users\<usuario>\AppData\Local\Programs\Python\...` ou similar).
-2. Adicione a função `cc` ao seu perfil do PowerShell (`notepad $PROFILE`):
+#### Opção 1: Comando único via PowerShell (Recomendado)
+
+Abra o PowerShell e execute:
 
 ```powershell
-function cc {
-    param([string]$Path)
-    $tmp = [System.IO.Path]::GetTempFileName()
-    try {
-        if ($Path) { python -m dirnav --cwd-file="$tmp" "$Path" }
-        else { python -m dirnav --cwd-file="$tmp" }
-        if (Test-Path $tmp) {
-            $target = (Get-Content $tmp -Raw).Trim()
-            if ($target -and (Test-Path $target)) { Set-Location $target }
-        }
-    } finally {
-        if (Test-Path $tmp) { Remove-Item $tmp -Force }
-    }
-}
+irm https://raw.githubusercontent.com/91wallace/dirnav/main/install.ps1 | iex
 ```
-*(Dessa forma o comando nativo `dir` do PowerShell continua funcionando normalmente para listar itens, enquanto o `cc` aciona o navegador interativo).*
+
+Após a instalação, recarregue o perfil ou reinicie o terminal:
+```powershell
+. $PROFILE
+```
+
+#### Opção 2: A partir do repositório clonado
+
+```powershell
+git clone https://github.com/91wallace/dirnav.git
+cd dirnav
+.\install.ps1
+```
+
+*(O instalador copia o executável para `%LOCALAPPDATA%\Programs\dirnav`, adiciona-o ao seu `PATH` e registra a função `cc` no `$PROFILE`).*
 
 ---
 
@@ -100,7 +102,9 @@ cc ~/projects
 
 ---
 
-## 🗑️ Desinstalação (Linux/macOS)
+## 🗑️ Desinstalação
+
+### Linux/macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/91wallace/dirnav/main/uninstall.sh | bash
@@ -109,6 +113,17 @@ curl -fsSL https://raw.githubusercontent.com/91wallace/dirnav/main/uninstall.sh 
 Ou no repositório clonado:
 ```bash
 ./uninstall.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/91wallace/dirnav/main/uninstall.ps1 | iex
+```
+
+Ou no repositório clonado:
+```powershell
+.\uninstall.ps1
 ```
 
 ---

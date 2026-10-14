@@ -186,12 +186,34 @@ def main():
                 elif selected_idx >= scroll_offset + max_lines:
                     scroll_offset = selected_idx - max_lines + 1
 
-            # Monta linhas (apenas os diretórios, sem cabeçalhos ou opções extras)
+            # Calcula quantas linhas de diretório cabem reservando espaço para indicadores ↑ / ↓
+            has_above = (scroll_offset > 0)
+            available_for_items = max_lines - (1 if has_above else 0)
+            has_below = (len(items) > scroll_offset + available_for_items)
+            if has_below:
+                available_for_items -= 1
+            available_for_items = max(1, available_for_items)
+
+            # Reajusta se selected_idx ultrapassar a nova janela visível
+            if selected_idx >= scroll_offset + available_for_items:
+                scroll_offset = selected_idx - available_for_items + 1
+                has_above = (scroll_offset > 0)
+                available_for_items = max_lines - (1 if has_above else 0)
+                has_below = (len(items) > scroll_offset + available_for_items)
+                if has_below:
+                    available_for_items -= 1
+                available_for_items = max(1, available_for_items)
+
+            # Monta linhas
             lines = []
             if not items:
                 lines.append("   \033[90m(nenhuma subpasta)\033[0m")
             else:
-                visible_items = items[scroll_offset:scroll_offset + max_lines]
+                if has_above:
+                    count_above = scroll_offset
+                    lines.append(f"   \033[90m↑ +{count_above} acima...\033[0m")
+
+                visible_items = items[scroll_offset:scroll_offset + available_for_items]
                 max_name_len = max(10, term_size.columns - 6)
                 for i, d in enumerate(visible_items):
                     actual_idx = scroll_offset + i
@@ -202,6 +224,10 @@ def main():
                         lines.append(f"\033[7m > {disp_name}/ \033[0m")
                     else:
                         lines.append(f"    \033[1;34m{disp_name}/\033[0m")
+
+                if has_below:
+                    count_below = len(items) - (scroll_offset + len(visible_items))
+                    lines.append(f"   \033[90m↓ +{count_below} mais...\033[0m")
 
             render_lines(lines)
 
@@ -217,7 +243,7 @@ def main():
             elif key in ('LEFT', 'h', 'H', '\x7f', '\b'):
                 # Seta para trás: volta um nível
                 parent = os.path.dirname(current_path)
-                if parent != current_path:
+                if parent and parent != current_path:
                     current_path = parent
                     selected_idx = 0
                     scroll_offset = 0
@@ -257,7 +283,7 @@ def main():
             # 1. Se foi passado arquivo de saída (--cwd-file), grava nele
             if cwd_file:
                 try:
-                    with open(cwd_file, 'w') as f:
+                    with open(cwd_file, 'w', encoding='utf-8') as f:
                         f.write(target_path)
                 except Exception:
                     pass
@@ -269,8 +295,12 @@ def main():
                 # Executado diretamente no terminal sem wrapper:
                 try:
                     os.chdir(target_path)
-                    shell = os.environ.get("SHELL", "/bin/bash")
-                    os.execlp(shell, shell)
+                    if IS_WINDOWS:
+                        # No Windows sem wrapper, imprime para orientar o usuário
+                        print(target_path)
+                    else:
+                        shell = os.environ.get("SHELL", "/bin/bash")
+                        os.execlp(shell, shell)
                 except Exception:
                     print(target_path)
 
