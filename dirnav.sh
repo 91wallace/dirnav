@@ -13,5 +13,6 @@ function dir() {
     rm -f "$tmp"
 }
 
-# Alias para manter compatibilidade com gg
+# Atalho alternativo cc (ideal para PowerShell/Windows/Linux) e compatibilidade gg
+alias cc=dir
 alias gg=dir

@@ -51,25 +51,26 @@ chmod +x install.sh
 
 ## 🚀 Como Usar
 
-No terminal, basta digitar:
+No terminal, você pode usar os comandos **`cc`** ou **`dir`**:
 
 ```bash
-dir
+cc
 ```
+*(Recomendado: o comando `cc` funciona perfeitamente em Linux, macOS e Windows sem conflitar com o comando nativo `dir` do PowerShell/CMD).*
 
-Ou especificar uma pasta inicial:
+Também é possível passar uma pasta inicial:
 
 ```bash
-dir ~/projects
+cc ~/projects
 ```
 
-*(O atalho alternativo `gg` também fica disponível por padrão).*
+*(Os comandos `dir` e `gg` também ficam configurados como atalhos).*
 
 ---
 
 ## ⚙️ Como Funciona
 
-1. Ao executar `dir`, uma função no seu shell cria um arquivo temporário e aciona o script executável `dirnav`.
+1. Ao executar `cc` (ou `dir`), uma função no seu shell cria um arquivo temporário e aciona o script executável `dirnav`.
 2. A interface interativa desenha a lista de pastas logo abaixo da linha digitada.
 3. Quando você navega e pressiona `q`, o `dirnav` grava o caminho escolhido e encerra limpando a área desenhada.
 4. O shell lê o caminho e executa `builtin cd`, atualizando o seu prompt na nova pasta de destino.

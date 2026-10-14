@@ -23,6 +23,7 @@ for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
         if grep -q "command dirnav" "$RC"; then
             # Remove o bloco de integração
             sed -i '/# Dirnav shell integration/,/alias gg=dir/d' "$RC"
+            sed -i '/alias cc=dir/d' "$RC"
             echo -e "${GREEN}✓${NC} Integração removida de $RC"
         fi
     fi

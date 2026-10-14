@@ -44,6 +44,7 @@ function dir() {
     fi
     rm -f "$tmp"
 }
+alias cc=dir
 alias gg=dir
 '
 
@@ -72,4 +73,4 @@ echo -e "${GREEN}Instalação concluída com sucesso!${NC}"
 echo "Para começar a usar na sessão atual, execute:"
 echo -e "  ${BLUE}source ~/.bashrc${NC}  (ou abra um novo terminal)"
 echo ""
-echo "Comando para usar: dir"
+echo "Comandos disponíveis: cc ou dir"
