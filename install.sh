@@ -31,7 +31,7 @@ echo -e "${GREEN}✓${NC} Executável instalado em $BIN_DIR/dirnav"
 # 2. Configura a integração com o shell
 INTEGRATION_BLOCK='
 # Dirnav shell integration
-function dir() {
+function cc() {
     local tmp
     tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
     command dirnav "$@" --cwd-file="$tmp"
@@ -44,8 +44,8 @@ function dir() {
     fi
     rm -f "$tmp"
 }
-alias cc=dir
-alias gg=dir
+alias dir=cc
+alias gg=cc
 '
 
 CONFIGURED=0
@@ -73,4 +73,4 @@ echo -e "${GREEN}Instalação concluída com sucesso!${NC}"
 echo "Para começar a usar na sessão atual, execute:"
 echo -e "  ${BLUE}source ~/.bashrc${NC}  (ou abra um novo terminal)"
 echo ""
-echo "Comandos disponíveis: cc ou dir"
+echo "Comando principal: cc"

@@ -1,5 +1,5 @@
 # Dirnav shell integration
-function dir() {
+function cc() {
     local tmp
     tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
     command dirnav "$@" --cwd-file="$tmp"
@@ -13,6 +13,6 @@ function dir() {
     rm -f "$tmp"
 }
 
-# Atalho alternativo cc (ideal para PowerShell/Windows/Linux) e compatibilidade gg
-alias cc=dir
-alias gg=dir
+# Aliases opcionais
+alias dir=cc
+alias gg=cc
