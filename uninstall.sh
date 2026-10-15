@@ -18,11 +18,16 @@ if [ -f "$BIN_PATH" ]; then
     echo -e "${GREEN}✓${NC} Removido $BIN_PATH"
 fi
 
+if [ -f "/etc/profile.d/dirnav.sh" ]; then
+    $SUDO rm -f "/etc/profile.d/dirnav.sh"
+    echo -e "${GREEN}✓${NC} Removido /etc/profile.d/dirnav.sh"
+fi
+
 for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$RC" ]; then
         if grep -q "command dirnav" "$RC"; then
-            # Remove o bloco de integração
             sed -i '/# Dirnav shell integration/,/alias dir=cc/d' "$RC"
+            sed -i '/function cc() {/,/alias dir=cc/d' "$RC"
             sed -i '/alias gg=/d' "$RC"
             sed -i '/alias cc=/d' "$RC"
             sed -i '/alias dir=/d' "$RC"
