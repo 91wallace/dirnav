@@ -50,18 +50,36 @@ def read_key(fd):
             # Verifica se há mais bytes chegando (setas ANSI, etc.) sem travar no ESC isolado
             r, _, _ = select.select([fd], [], [], 0.05)
             if r:
-                rest = os.read(fd, 8)
-                seq = b + rest
+                b2 = os.read(fd, 1)
+                seq = b + b2
+                if b2 in (b'[', b'O'):
+                    r2, _, _ = select.select([fd], [], [], 0.02)
+                    if r2:
+                        b3 = os.read(fd, 1)
+                        seq += b3
+                        if b3 in (b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'):
+                            while True:
+                                r3, _, _ = select.select([fd], [], [], 0.02)
+                                if not r3:
+                                    break
+                                bn = os.read(fd, 1)
+                                seq += bn
+                                if bn == b'~' or not bn.isdigit():
+                                    break
                 if seq in (b'\x1b[A', b'\x1bOA'): return 'UP'
                 elif seq in (b'\x1b[B', b'\x1bOB'): return 'DOWN'
                 elif seq in (b'\x1b[C', b'\x1bOC'): return 'RIGHT'
                 elif seq in (b'\x1b[D', b'\x1bOD'): return 'LEFT'
-                elif seq in (b'\x1b[H', b'\x1b[1~'): return 'HOME'
-                elif seq in (b'\x1b[F', b'\x1b[4~'): return 'END'
+                elif seq in (b'\x1b[H', b'\x1bOH', b'\x1b[1~', b'\x1b[7~'): return 'HOME'
+                elif seq in (b'\x1b[F', b'\x1bOF', b'\x1b[4~', b'\x1b[8~'): return 'END'
                 elif seq == b'\x1b[5~': return 'PAGEUP'
                 elif seq == b'\x1b[6~': return 'PAGEDOWN'
-                return seq.decode('utf-8', errors='replace')
+                return ''
             return 'ESC'
+        if b in (b'\r', b'\n'):
+            return '\n'
+        if b in (b'\x08', b'\x7f'):
+            return '\b'
         return b.decode('utf-8', errors='replace')
 
 def main():
@@ -81,10 +99,10 @@ def main():
         elif arg.startswith('--cwd-file='):
             cwd_file = arg.split('=', 1)[1]
             i += 1
-        elif os.path.isdir(arg):
-            start_path = os.path.abspath(arg)
-            i += 1
         else:
+            expanded = os.path.expanduser(arg)
+            if os.path.isdir(expanded):
+                start_path = os.path.abspath(expanded)
             i += 1
 
     current_path = start_path if start_path else os.getcwd()
@@ -114,8 +132,10 @@ def main():
 
         out = []
         # Se já renderizamos antes, move o cursor exatamente para a primeira linha
-        if prev_line_count > 0:
+        if prev_line_count > 1:
             out.append(f"\033[{prev_line_count - 1}A\r")
+        elif prev_line_count == 1:
+            out.append("\r")
 
         # Renderiza cada linha; a última linha NÃO tem \r\n para evitar scroll no rodapé do terminal
         for i, line in enumerate(lines):
@@ -295,21 +315,9 @@ def main():
                 except Exception:
                     pass
 
-            # 2. Se stdout foi redirecionado (canal/subshell), imprime no stdout
-            if not sys.stdout.isatty():
+            # 2. Se stdout foi redirecionado (canal/subshell) ou executado sem wrapper, imprime no stdout
+            if not sys.stdout.isatty() or not cwd_file:
                 print(target_path)
-            elif not cwd_file:
-                # Executado diretamente no terminal sem wrapper:
-                try:
-                    os.chdir(target_path)
-                    if IS_WINDOWS:
-                        # No Windows sem wrapper, imprime para orientar o usuário
-                        print(target_path)
-                    else:
-                        shell = os.environ.get("SHELL", "/bin/bash")
-                        os.execlp(shell, shell)
-                except Exception:
-                    print(target_path)
 
 if __name__ == '__main__':
     main()

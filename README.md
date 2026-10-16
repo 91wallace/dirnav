@@ -89,8 +89,6 @@ Também é possível passar uma pasta inicial:
 cc ~/projects
 ```
 
-*(No Linux, o alias `dir` também fica disponível para conveniência).*
-
 ---
 
 ## ⚙️ Como Funciona

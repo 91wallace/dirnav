@@ -2,7 +2,7 @@
 function cc() {
     local tmp
     tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
-    command dirnav "$@" --cwd-file="$tmp"
+    command dirnav --cwd-file="$tmp" "$@"
     if [ -s "$tmp" ]; then
         local target
         target="$(cat "$tmp")"
@@ -12,6 +12,3 @@ function cc() {
     fi
     rm -f "$tmp"
 }
-
-# Alias opcional
-alias dir=cc
