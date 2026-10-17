@@ -4,11 +4,14 @@
 .DESCRIPTION
     1. Baixa/Copia o script 'dirnav' e cria o launcher 'dirnav.cmd'.
     2. Instala em pasta no PATH do usuario ($env:LOCALAPPDATA\Programs\dirnav).
-    3. Registra a funcao 'dn' e o alias 'dirnav' no perfil do PowerShell ($PROFILE).
+    3. Permite configurar o comando de atalho customizado no perfil do PowerShell ($PROFILE).
 #>
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Position=0)]
+    [string]$Shortcut
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -60,7 +63,26 @@ if ($userPath -split ';' -notcontains $InstallDir) {
     Write-Host "[i] $InstallDir ja esta no PATH." -ForegroundColor Gray
 }
 
-# 6. Configura o perfil do PowerShell ($PROFILE)
+# 6. Escolha do comando de atalho
+if (-not $Shortcut) {
+    try {
+        Write-Host ""
+        Write-Host "Configuracao do atalho do terminal:" -ForegroundColor Yellow
+        Write-Host "  Recomendamos 'dn' (DirNav), mas voce pode escolher outro de sua preferencia." -ForegroundColor Gray
+        $prompt = Read-Host "Qual comando de atalho deseja usar? [padrao: dn]"
+        if ($prompt -and $prompt.Trim()) {
+            $Shortcut = $prompt.Trim()
+        } else {
+            $Shortcut = "dn"
+        }
+    } catch {
+        $Shortcut = "dn"
+    }
+}
+
+Write-Host "[✓] Atalho configurado: $Shortcut" -ForegroundColor Green
+
+# 7. Configura o perfil do PowerShell ($PROFILE)
 $profileDir = Split-Path $PROFILE -Parent
 if (-not (Test-Path $profileDir)) {
     New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
@@ -69,41 +91,41 @@ if (-not (Test-Path $PROFILE)) {
     New-Item -ItemType File -Force -Path $PROFILE | Out-Null
 }
 
-$integrationBlock = @'
+$integrationBlock = @"
 
 # Dirnav shell integration
-function dn {
+function $Shortcut {
     param(
-        [Parameter(Position=0, ValueFromRemainingArguments=$true)]
-        [string]$Path
+        [Parameter(Position=0, ValueFromRemainingArguments=`$true)]
+        [string]`$Path
     )
 
-    $tmp = [System.IO.Path]::GetTempFileName()
+    `$tmp = [System.IO.Path]::GetTempFileName()
     try {
-        if ($Path) {
-            dirnav --cwd-file="$tmp" "$Path"
+        if (`$Path) {
+            dirnav --cwd-file="`$tmp" "`$Path"
         } else {
-            dirnav --cwd-file="$tmp"
+            dirnav --cwd-file="`$tmp"
         }
-        if (Test-Path $tmp) {
-            $target = (Get-Content $tmp -Raw -Encoding utf8).Trim()
-            if ($target -and (Test-Path $target)) {
-                Set-Location $target
+        if (Test-Path `$tmp) {
+            `$target = (Get-Content `$tmp -Raw -Encoding utf8).Trim()
+            if (`$target -and (Test-Path `$target)) {
+                Set-Location `$target
             }
         }
     } finally {
-        if (Test-Path $tmp) {
-            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        if (Test-Path `$tmp) {
+            Remove-Item `$tmp -Force -ErrorAction SilentlyContinue
         }
     }
-Set-Alias -Name dirnav -Value dn -Option AllScope -ErrorAction SilentlyContinue
-Set-Alias -Name cc -Value dn -Option AllScope -ErrorAction SilentlyContinue
-'@
+}
+Set-Alias -Name dirnav -Value $Shortcut -Option AllScope -ErrorAction SilentlyContinue
+Set-Alias -Name cc -Value $Shortcut -Option AllScope -ErrorAction SilentlyContinue
+"@
 
 $profileContent = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
 if ($profileContent -match "(?ms)# Dirnav shell integration.*?(?=\r?\n\r?\n|$)") {
-    # Substitui bloco antigo
-    $cleanProfile = [System.Text.RegularExpressions.Regex]::Replace($profileContent, "(?ms)# Dirnav shell integration\s+function (?:cc|dn)\b.*?(?=\r?\n#|\z)", "")
+    $cleanProfile = [System.Text.RegularExpressions.Regex]::Replace($profileContent, "(?ms)# Dirnav shell integration\s+function \w+\b.*?(?=\r?\n#|\z)", "")
     $cleanProfile = $cleanProfile.Trim() + "`r`n" + $integrationBlock
     Set-Content -Path $PROFILE -Value $cleanProfile.Trim() -Encoding utf8
     Write-Host "[✓] Integracao atualizada no perfil do PowerShell: $PROFILE" -ForegroundColor Green
@@ -116,4 +138,4 @@ Write-Host ""
 Write-Host "Instalacao concluida com sucesso!" -ForegroundColor Green
 Write-Host "Para utilizar na sessao atual:" -ForegroundColor Yellow
 Write-Host "  . `$PROFILE" -ForegroundColor Cyan
-Write-Host "Comando: dn (ou dirnav)" -ForegroundColor Yellow
+Write-Host "Comando: $Shortcut (ou dirnav)" -ForegroundColor Yellow

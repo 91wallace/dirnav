@@ -48,6 +48,8 @@ chmod +x install.sh
 ./install.sh
 ```
 
+*(O instalador perguntará interativamente qual atalho você prefere usar, sugerindo `dn` por padrão para evitar conflitos com o compilador `cc`, ou você pode passar diretamente `./install.sh --shortcut=dn`).*
+
 ---
 
 ### Windows (PowerShell 5.1 / PowerShell 7+)

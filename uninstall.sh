@@ -43,20 +43,18 @@ import re, sys
 path = sys.argv[1]
 with open(path, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
-content = re.sub(r'\n?# Dirnav shell integration\s+function (?:cc|dn)\(\)\s*\{.*?\n\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'\n?function (?:cc|dn)\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'^\s*alias (?:gg|cc|dir|dirnav)=.*\n?', '', content, flags=re.MULTILINE)
+content = re.sub(r'\n?# Dirnav shell integration\s+function \w+\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias [^\n]+)*\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'\n?function \w+\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias [^\n]+)*\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'^\s*alias (?:gg|cc|dir|dirnav|dn)=.*\n?', '', content, flags=re.MULTILINE)
 with open(path, 'w', encoding='utf-8') as f:
     f.write(content.strip() + '\n' if content.strip() else '')
 EOF
             else
                 sed -i '/# Dirnav shell integration/,/^}/d' "$RC"
-                sed -i '/function cc() {/,/^}/d' "$RC"
-                sed -i '/function dn() {/,/^}/d' "$RC"
-                sed -i '/alias gg=/d' "$RC"
-                sed -i '/alias cc=/d' "$RC"
-                sed -i '/alias dir=/d' "$RC"
+                sed -i '/command dirnav/,/^}/d' "$RC"
                 sed -i '/alias dirnav=/d' "$RC"
+                sed -i '/alias dn=/d' "$RC"
+                sed -i '/alias cc=/d' "$RC"
             fi
             echo -e "${GREEN}[✓] Integracao removida de $RC${NC}"
         fi
