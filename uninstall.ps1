@@ -30,9 +30,10 @@ if ($userPath) {
 # 3. Remove integracao do $PROFILE
 if (Test-Path $PROFILE) {
     $content = Get-Content $PROFILE -Raw
-    if ($content -match "function cc\b") {
+    if ($content -match "function (?:cc|dn)\b" -or $content -match "# Dirnav shell integration") {
         # Substitui bloco de integracao do dirnav
-        $newProfile = [System.Text.RegularExpressions.Regex]::Replace($content, "(?ms)# Dirnav shell integration\s+function cc\s*\{.*?\n\}\r?\n?", "")
+        $newProfile = [System.Text.RegularExpressions.Regex]::Replace($content, "(?ms)# Dirnav shell integration\s+function (?:cc|dn)\b.*?(?:Set-Alias[^\r\n]*)?(?=\r?\n#|\z)", "")
+        $newProfile = [System.Text.RegularExpressions.Regex]::Replace($newProfile, "Set-Alias -Name dirnav -Value dn -Option AllScope -ErrorAction SilentlyContinue", "")
         Set-Content -Path $PROFILE -Value $newProfile.Trim() -Encoding utf8
         Write-Host "[✓] Integracao removida de $PROFILE" -ForegroundColor Green
     }

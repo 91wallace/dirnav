@@ -4,7 +4,7 @@ set -e
 REPO_RAW_URL="https://raw.githubusercontent.com/91wallace/dirnav/main"
 BIN_DIR="/usr/local/bin"
 
-# Cor para output
+# Cores para output
 GREEN='\033[0;32m'
 BLUE='\033[0;36m'
 YELLOW='\033[1;33m'
@@ -22,8 +22,13 @@ fi
 
 # Detecta se precisa de sudo para instalar em /usr/local/bin
 SUDO=""
-if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-    SUDO="sudo"
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    else
+        # Se não tiver sudo, instala localmente no PATH do usuário
+        BIN_DIR="$HOME/.local/bin"
+    fi
 fi
 
 # 2. Cria diretorio de destino caso nao exista
@@ -45,10 +50,10 @@ fi
 $SUDO chmod +x "$BIN_DIR/dirnav"
 echo -e "${GREEN}[✓] Executavel instalado em: $BIN_DIR/dirnav${NC}"
 
-# 4. Configura a integração com o shell
+# 4. Configura integração no sistema (/etc/profile.d para RHEL/Oracle/Debian/Ubuntu)
 INTEGRATION_BLOCK='
 # Dirnav shell integration
-function cc() {
+function dn() {
     local tmp
     tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
     command dirnav --cwd-file="$tmp" "$@"
@@ -61,30 +66,64 @@ function cc() {
     fi
     rm -f "$tmp"
 }
+alias dirnav=dn
+if ! command -v cc >/dev/null 2>&1 || [ "$(type -t cc 2>/dev/null)" = "alias" ]; then
+    alias cc=dn
+fi
 '
 
-CONFIGURED=0
-for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    if [ -f "$RC" ]; then
-        if ! grep -q "function cc()" "$RC" && ! grep -q "command dirnav" "$RC"; then
-            printf "%s\n" "$INTEGRATION_BLOCK" >> "$RC"
-            echo -e "${GREEN}[✓] Integracao adicionada ao perfil do shell: $RC${NC}"
-            CONFIGURED=1
-        else
-            echo -e "${GRAY}[i] Integracao ja presente no perfil do shell: $RC${NC}"
-            CONFIGURED=1
+if [ -d "/etc/profile.d" ]; then
+    printf "%s\n" "$INTEGRATION_BLOCK" | $SUDO tee "/etc/profile.d/dirnav.sh" >/dev/null
+    $SUDO chmod +x "/etc/profile.d/dirnav.sh" 2>/dev/null || true
+    echo -e "${GREEN}[✓] Integracao global adicionada em: /etc/profile.d/dirnav.sh${NC}"
+fi
+
+# 5. Detecta o diretório home do usuário real (mesmo executando com sudo)
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6)"
+if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+    TARGET_HOME="$HOME"
+fi
+
+clean_and_add_rc() {
+    local rc_file="$1"
+    [ -f "$rc_file" ] || return 0
+
+    # Remove integrações antigas (cc / dirnav antigos)
+    if grep -q "command dirnav" "$rc_file" || grep -q "# Dirnav shell integration" "$rc_file"; then
+        if command -v python3 >/dev/null 2>&1; then
+            python3 - "$rc_file" << 'EOF'
+import re, sys
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    content = f.read()
+content = re.sub(r'\n?# Dirnav shell integration\s+function (?:cc|dn)\(\)\s*\{.*?\n\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'\n?function (?:cc|dn)\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'^\s*alias (?:gg|cc|dir)=.*\n?', '', content, flags=re.MULTILINE)
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(content.strip() + '\n' if content.strip() else '')
+EOF
         fi
+    fi
+
+    printf "%s\n" "$INTEGRATION_BLOCK" >> "$rc_file"
+    echo -e "${GREEN}[✓] Integracao adicionada ao perfil: $rc_file${NC}"
+}
+
+CONFIGURED=0
+for RC in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.bash_profile"; do
+    if [ -f "$RC" ]; then
+        clean_and_add_rc "$RC"
+        CONFIGURED=1
     fi
 done
 
 if [ "$CONFIGURED" -eq 0 ]; then
-    # Se nenhum rc encontrado, adiciona ao .bashrc por padrão
-    printf "%s\n" "$INTEGRATION_BLOCK" >> "$HOME/.bashrc"
-    echo -e "${GREEN}[✓] Integracao adicionada ao perfil do shell: $HOME/.bashrc${NC}"
+    clean_and_add_rc "$TARGET_HOME/.bashrc"
 fi
 
 echo ""
 echo -e "${GREEN}Instalacao concluida com sucesso!${NC}"
 echo -e "${YELLOW}Para utilizar na sessao atual:${NC}"
 echo -e "  ${BLUE}source ~/.bashrc${NC}"
-echo -e "${YELLOW}Comando: cc${NC}"
+echo -e "${YELLOW}Comando:${NC} ${GREEN}dn${NC} (ou ${GREEN}dirnav${NC})"

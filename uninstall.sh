@@ -18,12 +18,23 @@ if [ -f "$BIN_PATH" ]; then
     echo -e "${GREEN}[✓] Removido executavel: $BIN_PATH${NC}"
 fi
 
+if [ -f "$HOME/.local/bin/dirnav" ]; then
+    rm -f "$HOME/.local/bin/dirnav"
+    echo -e "${GREEN}[✓] Removido executavel local: $HOME/.local/bin/dirnav${NC}"
+fi
+
 if [ -f "/etc/profile.d/dirnav.sh" ]; then
     $SUDO rm -f "/etc/profile.d/dirnav.sh"
     echo -e "${GREEN}[✓] Removido /etc/profile.d/dirnav.sh${NC}"
 fi
 
-for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6)"
+if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+    TARGET_HOME="$HOME"
+fi
+
+for RC in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.bash_profile"; do
     if [ -f "$RC" ]; then
         if grep -q "command dirnav" "$RC" || grep -q "# Dirnav shell integration" "$RC"; then
             if command -v python3 >/dev/null 2>&1; then
@@ -32,18 +43,20 @@ import re, sys
 path = sys.argv[1]
 with open(path, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
-content = re.sub(r'\n?# Dirnav shell integration\s+function cc\(\)\s*\{.*?\n\}(?:\s*alias dir=cc)?\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'\n?function cc\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias dir=cc)?\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'^\s*alias (?:gg|cc|dir)=.*\n?', '', content, flags=re.MULTILINE)
+content = re.sub(r'\n?# Dirnav shell integration\s+function (?:cc|dn)\(\)\s*\{.*?\n\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'\n?function (?:cc|dn)\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias (?:dirnav|dir)=.*)?\n?', '\n', content, flags=re.DOTALL)
+content = re.sub(r'^\s*alias (?:gg|cc|dir|dirnav)=.*\n?', '', content, flags=re.MULTILINE)
 with open(path, 'w', encoding='utf-8') as f:
     f.write(content.strip() + '\n' if content.strip() else '')
 EOF
             else
                 sed -i '/# Dirnav shell integration/,/^}/d' "$RC"
                 sed -i '/function cc() {/,/^}/d' "$RC"
+                sed -i '/function dn() {/,/^}/d' "$RC"
                 sed -i '/alias gg=/d' "$RC"
                 sed -i '/alias cc=/d' "$RC"
                 sed -i '/alias dir=/d' "$RC"
+                sed -i '/alias dirnav=/d' "$RC"
             fi
             echo -e "${GREEN}[✓] Integracao removida de $RC${NC}"
         fi

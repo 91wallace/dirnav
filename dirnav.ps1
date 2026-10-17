@@ -1,5 +1,5 @@
 # Dirnav PowerShell integration
-function cc {
+function dn {
     param(
         [Parameter(Position=0, ValueFromRemainingArguments=$true)]
         [string]$Path
@@ -24,3 +24,5 @@ function cc {
         }
     }
 }
+Set-Alias -Name dirnav -Value dn -Option AllScope -ErrorAction SilentlyContinue
+Set-Alias -Name cc -Value dn -Option AllScope -ErrorAction SilentlyContinue

@@ -4,7 +4,7 @@
 .DESCRIPTION
     1. Baixa/Copia o script 'dirnav' e cria o launcher 'dirnav.cmd'.
     2. Instala em pasta no PATH do usuario ($env:LOCALAPPDATA\Programs\dirnav).
-    3. Registra a funcao 'cc' no perfil do PowerShell ($PROFILE).
+    3. Registra a funcao 'dn' e o alias 'dirnav' no perfil do PowerShell ($PROFILE).
 #>
 
 [CmdletBinding()]
@@ -72,7 +72,7 @@ if (-not (Test-Path $PROFILE)) {
 $integrationBlock = @'
 
 # Dirnav shell integration
-function cc {
+function dn {
     param(
         [Parameter(Position=0, ValueFromRemainingArguments=$true)]
         [string]$Path
@@ -96,19 +96,24 @@ function cc {
             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
     }
-}
+Set-Alias -Name dirnav -Value dn -Option AllScope -ErrorAction SilentlyContinue
+Set-Alias -Name cc -Value dn -Option AllScope -ErrorAction SilentlyContinue
 '@
 
 $profileContent = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-if (-not $profileContent -or ($profileContent -notmatch "function cc\b")) {
+if ($profileContent -match "(?ms)# Dirnav shell integration.*?(?=\r?\n\r?\n|$)") {
+    # Substitui bloco antigo
+    $cleanProfile = [System.Text.RegularExpressions.Regex]::Replace($profileContent, "(?ms)# Dirnav shell integration\s+function (?:cc|dn)\b.*?(?=\r?\n#|\z)", "")
+    $cleanProfile = $cleanProfile.Trim() + "`r`n" + $integrationBlock
+    Set-Content -Path $PROFILE -Value $cleanProfile.Trim() -Encoding utf8
+    Write-Host "[✓] Integracao atualizada no perfil do PowerShell: $PROFILE" -ForegroundColor Green
+} else {
     Add-Content -Path $PROFILE -Value $integrationBlock
     Write-Host "[✓] Integracao adicionada ao perfil do PowerShell: $PROFILE" -ForegroundColor Green
-} else {
-    Write-Host "[i] Integracao ja presente no perfil do PowerShell." -ForegroundColor Gray
 }
 
 Write-Host ""
 Write-Host "Instalacao concluida com sucesso!" -ForegroundColor Green
 Write-Host "Para utilizar na sessao atual:" -ForegroundColor Yellow
 Write-Host "  . `$PROFILE" -ForegroundColor Cyan
-Write-Host "Comando: cc" -ForegroundColor Yellow
+Write-Host "Comando: dn (ou dirnav)" -ForegroundColor Yellow

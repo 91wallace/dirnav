@@ -48,24 +48,20 @@ def read_key(fd):
             return ''
         if b == b'\x1b':
             # Verifica se há mais bytes chegando (setas ANSI, etc.) sem travar no ESC isolado
-            r, _, _ = select.select([fd], [], [], 0.05)
+            # Timeout de 0.15s (150ms) garante tolerância para conexões remotas SSH e multiplexadores (tmux)
+            r, _, _ = select.select([fd], [], [], 0.15)
             if r:
                 b2 = os.read(fd, 1)
                 seq = b + b2
                 if b2 in (b'[', b'O'):
-                    r2, _, _ = select.select([fd], [], [], 0.02)
-                    if r2:
-                        b3 = os.read(fd, 1)
-                        seq += b3
-                        if b3 in (b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'):
-                            while True:
-                                r3, _, _ = select.select([fd], [], [], 0.02)
-                                if not r3:
-                                    break
-                                bn = os.read(fd, 1)
-                                seq += bn
-                                if bn == b'~' or not bn.isdigit():
-                                    break
+                    while True:
+                        r2, _, _ = select.select([fd], [], [], 0.05)
+                        if not r2:
+                            break
+                        bn = os.read(fd, 1)
+                        seq += bn
+                        if bn.isalpha() or bn == b'~':
+                            break
                 if seq in (b'\x1b[A', b'\x1bOA'): return 'UP'
                 elif seq in (b'\x1b[B', b'\x1bOB'): return 'DOWN'
                 elif seq in (b'\x1b[C', b'\x1bOC'): return 'RIGHT'
@@ -274,14 +270,32 @@ def main():
                     current_path = parent
                     selected_idx = 0
                     scroll_offset = 0
-            elif key in ('RIGHT', 'l', 'L', '\r', '\n'):
-                # Seta para frente ou Enter: entra no diretório selecionado
+            elif key in ('RIGHT', 'l', 'L'):
+                # Seta para a direita ou l: entra no diretório selecionado
                 if items and 0 <= selected_idx < len(items):
                     new_path = os.path.join(current_path, items[selected_idx])
                     if os.path.isdir(new_path):
                         current_path = new_path
                         selected_idx = 0
                         scroll_offset = 0
+            elif key in ('\r', '\n'):
+                # Enter: entra no diretório selecionado; se pasta não tiver subpastas, confirma e encerra
+                if items and 0 <= selected_idx < len(items):
+                    new_path = os.path.join(current_path, items[selected_idx])
+                    if os.path.isdir(new_path):
+                        current_path = new_path
+                        selected_idx = 0
+                        scroll_offset = 0
+                else:
+                    target_path = current_path
+                    break
+            elif key == ' ':
+                # Espaço: confirma a pasta selecionada (se houver) ou a atual
+                if items and 0 <= selected_idx < len(items):
+                    target_path = os.path.join(current_path, items[selected_idx])
+                else:
+                    target_path = current_path
+                break
             elif key in ('q', 'Q'):
                 # 'q': fica no diretório atual
                 target_path = current_path
