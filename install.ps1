@@ -144,7 +144,9 @@ if ($env:DIRNAV_TEST_PROFILE) {
     $docs = [Environment]::GetFolderPath("MyDocuments")
     if ($docs) {
         $targetProfiles += Join-Path $docs "PowerShell\Microsoft.PowerShell_profile.ps1"
+        $targetProfiles += Join-Path $docs "PowerShell\profile.ps1"
         $targetProfiles += Join-Path $docs "WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        $targetProfiles += Join-Path $docs "WindowsPowerShell\profile.ps1"
     }
     if ($PROFILE -and ($targetProfiles -notcontains $PROFILE)) {
         $targetProfiles += $PROFILE
