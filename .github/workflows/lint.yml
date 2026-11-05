@@ -1,0 +1,49 @@
+name: Lint & Static Analysis
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  python-lint:
+    name: Ruff Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Ruff
+        run: python -m pip install ruff
+
+      - name: Run Ruff Check on dirnav and tests
+        run: |
+          ruff check dirnav tests/
+          ruff format --check dirnav tests/
+
+  powershell-syntax:
+    name: PowerShell AST Syntax Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate PowerShell Scripts Syntax
+        shell: pwsh
+        run: |
+          $scripts = @("dirnav.ps1", "install.ps1", "uninstall.ps1", "tests/shell/Dirnav.Tests.ps1")
+          foreach ($s in $scripts) {
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $s), [ref]$null, [ref]$errors)
+              if ($errors.Count -gt 0) {
+                  Write-Error "Erros de sintaxe em $s : $($errors | Out-String)"
+                  exit 1
+              }
+              Write-Host "[OK] Sintaxe valida: $s" -ForegroundColor Green
+          }
