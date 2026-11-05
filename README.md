@@ -28,7 +28,35 @@
 
 ## 📦 Instalação
 
-### Linux e macOS (Bash / Zsh)
+### Multiplataforma via NPM (Windows, Linux, macOS)
+
+```bash
+npm install -g dirnav
+```
+*(Configura automaticamente os comandos `cc`, `dn` e `dirnav` no seu perfil do PowerShell, Bash ou Zsh!)*
+
+---
+
+### Windows via Winget
+
+```powershell
+winget install 91wallace.dirnav
+dirnav --setup
+```
+
+---
+
+### Arch Linux (AUR / Pacman)
+
+```bash
+yay -S dirnav
+# ou via makepkg:
+cd packaging/arch && makepkg -si
+```
+
+---
+
+### Linux e macOS (Bash / Zsh via Script)
 
 #### Opção 1: Comando único via `curl` (Recomendado)
 

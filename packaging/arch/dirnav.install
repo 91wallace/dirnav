@@ -1,0 +1,14 @@
+post_install() {
+    echo "==> dirnav instalado com sucesso!"
+    echo "    A integracao para Bash foi adicionada em /etc/profile.d/dirnav.sh"
+    echo "    Para ativar na sessao atual (ou no Zsh), execute:"
+    echo "      dirnav --setup && source ~/.bashrc"
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    echo "==> Para remover integracoes locais de ~/.bashrc ou ~/.zshrc, remova o bloco '# Dirnav shell integration'."
+}

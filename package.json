@@ -1,0 +1,46 @@
+{
+  "name": "dirnav",
+  "version": "1.0.0",
+  "description": "Fast inline terminal directory navigator with real-time search (supports PowerShell 7, Bash, Zsh, CMD)",
+  "keywords": [
+    "cli",
+    "directory",
+    "navigator",
+    "terminal",
+    "powershell",
+    "bash",
+    "zsh",
+    "cd",
+    "cc",
+    "dn"
+  ],
+  "homepage": "https://github.com/91wallace/dirnav",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/91wallace/dirnav.git"
+  },
+  "bugs": {
+    "url": "https://github.com/91wallace/dirnav/issues"
+  },
+  "author": "Wallace Ghiraldelli <wgx7426@gmail.com>",
+  "license": "MIT",
+  "bin": {
+    "dirnav": "./bin/dirnav-cli.js"
+  },
+  "files": [
+    "dirnav",
+    "dirnav.ps1",
+    "dirnav.sh",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.js",
+    "preuninstall": "node ./bin/preuninstall.js",
+    "test": "python -m pytest"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

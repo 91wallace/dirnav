@@ -1,0 +1,207 @@
+name: Release & Publish (NPM, Winget, AUR/Pacman)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versao da release (ex: 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  quality-gate:
+    name: Quality Gate (Tests & Lint)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install pytest ruff
+
+      - name: Run Ruff & Pytest
+        run: |
+          ruff check dirnav tests/
+          python -m pytest tests/ -v
+
+      - name: Run PowerShell 7 Integration Tests
+        shell: pwsh
+        run: ./tests/shell/Dirnav.Tests.ps1
+
+  build-and-github-release:
+    name: Build Windows Binary & Create GitHub Release
+    needs: quality-gate
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha256: ${{ steps.build_zip.outputs.sha256 }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract Version
+        id: meta
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+              $ver = "${{ github.event.inputs.version }}".TrimStart('v')
+          } else {
+              $ver = "${{ github.ref_name }}".TrimStart('v')
+          }
+          Write-Host "Release Version: $ver"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller
+
+      - name: Build Standalone dirnav.exe & Package ZIP for Winget
+        id: build_zip
+        shell: pwsh
+        run: |
+          Copy-Item dirnav dirnav_entry.py
+          pyinstaller --onefile --name dirnav dirnav_entry.py
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          Copy-Item dist/dirnav.exe dist/package/dirnav.exe
+
+          $cmdWrapper = @"
+          @echo off
+          echo %* | findstr /C:"--cwd-file" >nul 2>&1
+          if %ERRORLEVEL% EQU 0 (
+              "%~dp0dirnav.exe" %*
+              exit /b %ERRORLEVEL%
+          )
+          set "DIRNAV_TMP=%TEMP%\dirnav-cmd-%RANDOM%-%RANDOM%.tmp"
+          "%~dp0dirnav.exe" --cwd-file "%DIRNAV_TMP%" %*
+          if exist "%DIRNAV_TMP%" (
+              set /p DIRNAV_TARGET=<"%DIRNAV_TMP%"
+              del /f /q "%DIRNAV_TMP%" >nul 2>&1
+              if defined DIRNAV_TARGET cd /d "%DIRNAV_TARGET%"
+              set "DIRNAV_TARGET="
+          )
+          set "DIRNAV_TMP="
+          "@
+          [System.IO.File]::WriteAllText("$PWD/dist/package/cc.cmd", $cmdWrapper)
+          [System.IO.File]::WriteAllText("$PWD/dist/package/dn.cmd", $cmdWrapper)
+          Copy-Item LICENSE dist/package/LICENSE
+          Copy-Item README.md dist/package/README.md
+
+          Compress-Archive -Path dist/package/* -DestinationPath dist/dirnav-windows-x64.zip -Force
+          $hash = (Get-FileHash dist/dirnav-windows-x64.zip -Algorithm SHA256).Hash
+          Write-Host "ZIP SHA256: $hash"
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dirnav-windows-x64.zip
+            dist/dirnav.exe
+          generate_release_notes: true
+
+  publish-npm:
+    name: Publish to NPM
+    needs: build-and-github-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Sync Version & Publish to NPM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::Secret NPM_TOKEN nao configurado. Pulando publicacao no NPM."
+            exit 0
+          fi
+          npm version "${{ needs.build-and-github-release.outputs.version }}" --no-git-tag-version --allow-same-version
+          npm publish --access public
+
+  publish-aur:
+    name: Publish to Arch Linux AUR (Pacman)
+    needs: build-and-github-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check AUR Secret
+        id: check_aur
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::warning::Secret AUR_SSH_PRIVATE_KEY nao configurado. Pulando publicacao no AUR."
+            echo "has_key=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_key=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update PKGBUILD version
+        if: steps.check_aur.outputs.has_key == 'true'
+        run: |
+          VER="${{ needs.build-and-github-release.outputs.version }}"
+          sed -i "s/^pkgver=.*/pkgver=${VER}/" packaging/arch/PKGBUILD
+          sed -i "s/pkgver = .*/pkgver = ${VER}/" packaging/arch/.SRCINFO
+          sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${VER}/g" packaging/arch/.SRCINFO
+
+      - name: Push to AUR
+        if: steps.check_aur.outputs.has_key == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@v4.0.0
+        with:
+          pkgname: dirnav
+          pkgbuild: ./packaging/arch/PKGBUILD
+          assets: ./packaging/arch/dirnav.install
+          commit_username: Wallace Ghiraldelli
+          commit_email: wgx7426@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update dirnav to v${{ needs.build-and-github-release.outputs.version }}"
+
+  publish-winget:
+    name: Publish to Windows Package Manager (Winget)
+    needs: build-and-github-release
+    runs-on: windows-latest
+    steps:
+      - name: Check WINGET_TOKEN Secret
+        id: check_winget
+        shell: pwsh
+        env:
+          WG_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WG_TOKEN)) {
+            Write-Warning "Secret WINGET_TOKEN nao configurado. Pulando submissao ao Winget."
+            "has_token=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "has_token=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Submit to Winget
+        if: steps.check_winget.outputs.has_token == 'true' && startsWith(github.ref, 'refs/tags/v')
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: 91wallace.dirnav
+          installers-regex: '\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}

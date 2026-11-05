@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import contextlib
 import os
+import re
 import shutil
 import signal
 import sys
 import unicodedata
+
+__version__ = "1.0.0"
 
 try:
     import select
@@ -414,15 +417,194 @@ class NavigatorState:
             self.apply_filter()
 
 
+def get_powershell_integration_block(shortcut="dn"):
+    return f"""# Dirnav shell integration
+function {shortcut} {{
+    param(
+        [Parameter(Position=0, ValueFromRemainingArguments=$true)]
+        [string]$Path
+    )
+
+    $tmp = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "dirnav-cwd-$([guid]::NewGuid().ToString('N')).tmp")
+    try {{
+        $installedExe = Join-Path $env:LOCALAPPDATA "Microsoft\\WinGet\\Links\\dirnav.exe"
+        $installedPy = Join-Path $env:LOCALAPPDATA "Programs\\dirnav\\dirnav.py"
+        if (Get-Command "dirnav.exe" -ErrorAction SilentlyContinue) {{
+            if ($Path) {{
+                dirnav.exe --cwd-file "$tmp" "$Path"
+            }} else {{
+                dirnav.exe --cwd-file "$tmp"
+            }}
+        }} elseif (Test-Path -LiteralPath $installedExe) {{
+            if ($Path) {{
+                & $installedExe --cwd-file "$tmp" "$Path"
+            }} else {{
+                & $installedExe --cwd-file "$tmp"
+            }}
+        }} elseif (Test-Path -LiteralPath $installedPy) {{
+            $pyExe = if (Get-Command "py" -ErrorAction SilentlyContinue) {{ "py" }} else {{ "python" }}
+            if ($Path) {{
+                & $pyExe "$installedPy" --cwd-file "$tmp" "$Path"
+            }} else {{
+                & $pyExe "$installedPy" --cwd-file "$tmp"
+            }}
+        }} else {{
+            if ($Path) {{
+                dirnav --cwd-file "$tmp" "$Path"
+            }} else {{
+                dirnav --cwd-file "$tmp"
+            }}
+        }}
+        if (Test-Path -LiteralPath $tmp) {{
+            $raw = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
+            if ($null -ne $raw) {{
+                $target = $raw.Trim()
+                if ($target -and (Test-Path -LiteralPath $target -PathType Container)) {{
+                    Set-Location -LiteralPath $target
+                }}
+            }}
+        }}
+    }} finally {{
+        if (Test-Path -LiteralPath $tmp) {{
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }}
+    }}
+}}
+Set-Alias -Name dirnav -Value {shortcut} -Option AllScope -Force -ErrorAction SilentlyContinue
+Set-Alias -Name cc -Value {shortcut} -Option AllScope -Force -ErrorAction SilentlyContinue
+# END Dirnav shell integration"""
+
+
+def get_posix_integration_block(shortcut="dn"):
+    return f"""# Dirnav shell integration
+function {shortcut}() {{
+    local tmp
+    tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
+    command dirnav --cwd-file="$tmp" "$@"
+    if [ -s "$tmp" ]; then
+        local target
+        target="$(cat "$tmp")"
+        if [ -n "$target" ] && [ -d "$target" ]; then
+            builtin cd -- "$target"
+        fi
+    fi
+    rm -f "$tmp"
+}}
+alias dirnav={shortcut}
+if ! command -v cc >/dev/null 2>&1 || [ "$(type -t cc 2>/dev/null)" = "alias" ]; then
+    alias cc={shortcut}
+fi
+# END Dirnav shell integration"""
+
+
+def get_target_profiles():
+    """Retorna a lista de arquivos de perfil do shell para o sistema atual."""
+    env_prof = os.environ.get("DIRNAV_TEST_PROFILE")
+    if env_prof:
+        return [p for p in env_prof.split(os.pathsep) if p]
+
+    home = os.path.expanduser("~")
+    if IS_WINDOWS:
+        docs = os.path.join(home, "Documents")
+        return [
+            os.path.join(docs, "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+            os.path.join(docs, "PowerShell", "profile.ps1"),
+            os.path.join(docs, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+            os.path.join(docs, "WindowsPowerShell", "profile.ps1"),
+        ]
+    return [
+        os.path.join(home, ".bashrc"),
+        os.path.join(home, ".zshrc"),
+    ]
+
+
+def setup_shell_integration(shortcut="dn"):
+    """Injeta de forma idempotente a integracao de shell nos perfis do usuario."""
+    profiles = get_target_profiles()
+    block = (
+        get_powershell_integration_block(shortcut)
+        if IS_WINDOWS
+        else get_posix_integration_block(shortcut)
+    )
+    pattern = re.compile(
+        r"# Dirnav shell integration.*?# END Dirnav shell integration\r?\n?|# Dirnav shell integration\s+function \w+\b.*?(?:Set-Alias -Name cc[^\r\n]*\r?\n?|alias cc=[^\r\n]*\r?\n?|fi\r?\n?)",
+        re.DOTALL,
+    )
+
+    updated = []
+    for prof in profiles:
+        with contextlib.suppress(OSError):
+            prof_dir = os.path.dirname(prof)
+            if prof_dir and not os.path.exists(prof_dir):
+                os.makedirs(prof_dir, exist_ok=True)
+            content = ""
+            if os.path.exists(prof):
+                with open(prof, encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            if "# Dirnav shell integration" in content:
+                content = pattern.sub("", content)
+            new_content = (
+                (content.strip() + "\n\n" + block + "\n")
+                if content.strip()
+                else (block + "\n")
+            )
+            with open(prof, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            updated.append(prof)
+    return updated
+
+
+def uninstall_shell_integration():
+    """Remove de forma limpa a integracao de shell dos perfis do usuario."""
+    profiles = get_target_profiles()
+    pattern = re.compile(
+        r"# Dirnav shell integration.*?# END Dirnav shell integration\r?\n?|# Dirnav shell integration\s+function \w+\b.*?(?:Set-Alias -Name cc[^\r\n]*\r?\n?|Set-Alias -Name dirnav[^\r\n]*\r?\n?|alias cc=[^\r\n]*\r?\n?|fi\r?\n?)+",
+        re.DOTALL,
+    )
+    orphan_alias_pattern = re.compile(
+        r"^Set-Alias -Name (dirnav|cc) -Value \w+ -Option AllScope.*?\r?\n?",
+        re.MULTILINE,
+    )
+
+    cleaned = []
+    for prof in profiles:
+        if os.path.exists(prof):
+            with contextlib.suppress(OSError):
+                with open(prof, encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                if "# Dirnav shell integration" in content or "--cwd-file" in content:
+                    new_content = pattern.sub("", content)
+                    new_content = orphan_alias_pattern.sub("", new_content)
+                    with open(prof, "w", encoding="utf-8") as f:
+                        f.write(
+                            new_content.strip() + ("\n" if new_content.strip() else "")
+                        )
+                    cleaned.append(prof)
+    return cleaned
+
+
 def parse_args(argv):
     """Analisa os argumentos de linha de comando."""
     cwd_file = None
     start_path = None
+    action = None
 
     i = 1
     while i < len(argv):
         arg = argv[i]
-        if arg == "--cwd-file" and i + 1 < len(argv):
+        if arg in ("--version", "-v"):
+            action = "version"
+            i += 1
+        elif arg in ("--setup", "--init"):
+            action = "setup"
+            i += 1
+        elif arg == "--uninstall":
+            action = "uninstall"
+            i += 1
+        elif arg in ("--help", "-h"):
+            action = "help"
+            i += 1
+        elif arg == "--cwd-file" and i + 1 < len(argv):
             cwd_file = argv[i + 1]
             i += 2
         elif arg.startswith("--cwd-file="):
@@ -434,7 +616,7 @@ def parse_args(argv):
                 start_path = os.path.abspath(expanded)
             i += 1
 
-    return cwd_file, start_path
+    return cwd_file, start_path, action
 
 
 def write_output(target_path, cwd_file, stdout_stream=None):
@@ -458,11 +640,37 @@ def write_output(target_path, cwd_file, stdout_stream=None):
 
 
 def main():
+    parsed = parse_args(sys.argv)
+    if len(parsed) == 3:
+        cwd_file, start_path, action = parsed
+    else:
+        cwd_file, start_path = parsed
+        action = None
+
+    if action == "version":
+        print(f"dirnav {__version__}")
+        sys.exit(0)
+    elif action == "help":
+        print(
+            f"dirnav {__version__} - Navegador de diretorios inline\n"
+            "Uso: dn [caminho] | cc [caminho] | dirnav [--setup|--uninstall|--version]"
+        )
+        sys.exit(0)
+    elif action == "setup":
+        updated = setup_shell_integration()
+        for p in updated:
+            print(f"[OK] Integracao configurada em: {p}")
+        sys.exit(0)
+    elif action == "uninstall":
+        cleaned = uninstall_shell_integration()
+        for p in cleaned:
+            print(f"[OK] Integracao removida de: {p}")
+        sys.exit(0)
+
     test_keys_env = os.environ.get("DIRNAV_TEST_KEYS")
     if not sys.stdin.isatty() and not test_keys_env:
         sys.exit(1)
 
-    cwd_file, start_path = parse_args(sys.argv)
     initial_path = start_path if start_path else os.getcwd()
 
     if test_keys_env:

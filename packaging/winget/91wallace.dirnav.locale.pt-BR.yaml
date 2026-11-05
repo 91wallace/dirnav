@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: 91wallace.dirnav
+PackageVersion: 1.0.0
+PackageLocale: pt-BR
+Publisher: Wallace Ghiraldelli
+PublisherUrl: https://github.com/91wallace
+PackageName: dirnav
+PackageUrl: https://github.com/91wallace/dirnav
+License: MIT
+LicenseUrl: https://github.com/91wallace/dirnav/blob/main/LICENSE
+ShortDescription: Navegador de diretorios inline ultrarrapido para terminal com busca em tempo real (PowerShell 7, Bash, Zsh)
+Tags:
+  - cli
+  - directory
+  - navigator
+  - terminal
+  - powershell
+  - cc
+  - dn
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
