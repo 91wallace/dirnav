@@ -2,9 +2,9 @@
 .SYNOPSIS
     Script de instalacao automatica do dirnav no Windows (PowerShell 5.1 / PowerShell 7+)
 .DESCRIPTION
-    1. Baixa/Copia o script 'dirnav' e cria os launchers 'dirnav.cmd' e 'cc.cmd'.
+    1. Baixa/Copia o script 'dirnav' e cria os launchers 'dirnav.cmd' e 'cc.cmd' (com cd /d nativo para CMD).
     2. Instala em pasta no PATH do usuario ($env:LOCALAPPDATA\Programs\dirnav).
-    3. Configura a integracao e o comando nativo 'cc' nos perfis do PowerShell 7 e Windows PowerShell 5.1.
+    3. Configura a integracao direta via Python e o comando nativo 'cc' nos perfis do PowerShell 7 e Windows PowerShell 5.1.
 #>
 
 [CmdletBinding()]
@@ -61,8 +61,26 @@ if (Test-Path -LiteralPath $localDirnav) {
 }
 
 # 4. Cria wrappers executaveis 'dirnav.cmd' e 'cc.cmd'
+# Se chamados com --cwd-file, apenas repassam para o Python;
+# Se chamados diretamente pelo CMD (ou em terminal sem profile carregado), criam temp file e executam cd /d nativo!
 $cmdLauncher = Join-Path $InstallDir "dirnav.cmd"
-$cmdContent = "@echo off`r`n`"$pythonCmd`" `"$targetScript`" %*`r`n"
+$cmdContent = @"
+@echo off
+echo %* | findstr /C:"--cwd-file" >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    "$pythonCmd" "$targetScript" %*
+    exit /b %ERRORLEVEL%
+)
+set "DIRNAV_TMP=%TEMP%\dirnav-cmd-%RANDOM%-%RANDOM%.tmp"
+"$pythonCmd" "$targetScript" --cwd-file "%DIRNAV_TMP%" %*
+if exist "%DIRNAV_TMP%" (
+    set /p DIRNAV_TARGET=<"%DIRNAV_TMP%"
+    del /f /q "%DIRNAV_TMP%" >nul 2>&1
+    if defined DIRNAV_TARGET cd /d "%DIRNAV_TARGET%"
+    set "DIRNAV_TARGET="
+)
+set "DIRNAV_TMP="
+"@
 [System.IO.File]::WriteAllText($cmdLauncher, $cmdContent)
 
 $ccLauncher = Join-Path $InstallDir "cc.cmd"
@@ -100,7 +118,7 @@ if (-not $PSBoundParameters.ContainsKey('Shortcut') -and -not $NonInteractive) {
 
 Write-Host "[OK] Atalho configurado: $Shortcut (e 'cc' habilitado)" -ForegroundColor Green
 
-# 7. Monta o bloco de integracao com delimitadores claros
+# 7. Monta o bloco de integracao chamando Python diretamente com argumentos separados (--cwd-file "$tmp")
 $integrationBlock = @"
 # Dirnav shell integration
 function $Shortcut {
@@ -111,13 +129,22 @@ function $Shortcut {
 
     `$tmp = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "dirnav-cwd-`$([guid]::NewGuid().ToString('N')).tmp")
     try {
-        if (`$Path) {
-            dirnav.cmd --cwd-file="`$tmp" "`$Path"
+        `$scriptPath = "$targetScript"
+        if (Test-Path -LiteralPath `$scriptPath) {
+            if (`$Path) {
+                & "$pythonCmd" "`$scriptPath" --cwd-file "`$tmp" "`$Path"
+            } else {
+                & "$pythonCmd" "`$scriptPath" --cwd-file "`$tmp"
+            }
         } else {
-            dirnav.cmd --cwd-file="`$tmp"
+            if (`$Path) {
+                dirnav.cmd --cwd-file "`$tmp" "`$Path"
+            } else {
+                dirnav.cmd --cwd-file "`$tmp"
+            }
         }
         if (Test-Path -LiteralPath `$tmp) {
-            `$raw = Get-Content -LiteralPath `$tmp -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+            `$raw = [System.IO.File]::ReadAllText(`$tmp, [System.Text.Encoding]::UTF8)
             if (`$null -ne `$raw) {
                 `$target = `$raw.Trim()
                 if (`$target -and (Test-Path -LiteralPath `$target -PathType Container)) {

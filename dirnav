@@ -440,34 +440,47 @@ def parse_args(argv):
 def write_output(target_path, cwd_file, stdout_stream=None):
     """
     Grava o caminho selecionado.
-    Bug Critico 1 resolvido: se cwd_file foi fornecido, grava EXCLUSIVAMENTE nele
-    sem vazar output duplicado em stdout.
+    Bug Critico 1 e 7 resolvidos: normaliza o caminho com abspath/normpath e,
+    se cwd_file foi fornecido, grava EXCLUSIVAMENTE nele em UTF-8 sem BOM.
     """
     if not target_path:
         return
 
+    norm_target = os.path.normpath(os.path.abspath(target_path))
+
     if cwd_file:
         with contextlib.suppress(OSError), open(cwd_file, "w", encoding="utf-8") as f:
-            f.write(target_path)
+            f.write(norm_target)
     else:
         out = stdout_stream if stdout_stream is not None else sys.stdout
-        out.write(target_path + "\n")
+        out.write(norm_target + "\n")
         out.flush()
 
 
 def main():
-    if not sys.stdin.isatty():
+    test_keys_env = os.environ.get("DIRNAV_TEST_KEYS")
+    if not sys.stdin.isatty() and not test_keys_env:
         sys.exit(1)
 
     cwd_file, start_path = parse_args(sys.argv)
     initial_path = start_path if start_path else os.getcwd()
 
-    if not IS_WINDOWS:
+    if test_keys_env:
+        fd = None
+        old_settings = None
+        test_key_queue = [
+            "\n" if k == "ENTER" else "\b" if k == "BACKSPACE" else k
+            for k in test_keys_env.split(",")
+            if k
+        ]
+    elif not IS_WINDOWS:
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+        test_key_queue = None
     else:
         fd = None
         old_settings = None
+        test_key_queue = None
         os.system("")  # habilita processamento ANSI no Windows Terminal / conhost
 
     ui_out = sys.stderr
@@ -540,7 +553,7 @@ def main():
     signal.signal(signal.SIGINT, sigint_handler)
 
     try:
-        if not IS_WINDOWS:
+        if not IS_WINDOWS and fd is not None:
             tty.setraw(fd)
             termios.tcflush(fd, termios.TCIFLUSH)
         ui_out.write("\033[?25l")  # Esconde cursor
@@ -561,7 +574,10 @@ def main():
             )
             render_lines(lines)
 
-            key = read_key(fd)
+            if test_key_queue is not None:
+                key = test_key_queue.pop(0) if test_key_queue else "ESC"
+            else:
+                key = read_key(fd)
             state.handle_key(key)
 
     except KeyboardInterrupt:

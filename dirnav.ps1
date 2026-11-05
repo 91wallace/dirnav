@@ -7,22 +7,28 @@ function dn {
 
     $tmp = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "dirnav-cwd-$([guid]::NewGuid().ToString('N')).tmp")
     try {
-        $dirnavCmd = if (Get-Command "dirnav.cmd" -ErrorAction SilentlyContinue) { "dirnav.cmd" } elseif (Test-Path "$PSScriptRoot\dirnav") { "py `"$PSScriptRoot\dirnav`"" } else { "dirnav" }
-        if ($Path) {
-            if ($dirnavCmd.StartsWith("py ")) {
-                py "$PSScriptRoot\dirnav" --cwd-file="$tmp" "$Path"
+        $installedScript = Join-Path $env:LOCALAPPDATA "Programs\dirnav\dirnav.py"
+        $localScript = Join-Path $PSScriptRoot "dirnav"
+        $scriptToRun = if (Test-Path -LiteralPath $localScript) { $localScript } elseif (Test-Path -LiteralPath $installedScript) { $installedScript } else { $null }
+
+        $pyExe = if (Get-Command "py" -ErrorAction SilentlyContinue) { "py" } else { "python" }
+
+        if ($scriptToRun) {
+            if ($Path) {
+                & $pyExe "$scriptToRun" --cwd-file "$tmp" "$Path"
             } else {
-                & $dirnavCmd --cwd-file="$tmp" "$Path"
+                & $pyExe "$scriptToRun" --cwd-file "$tmp"
             }
         } else {
-            if ($dirnavCmd.StartsWith("py ")) {
-                py "$PSScriptRoot\dirnav" --cwd-file="$tmp"
+            if ($Path) {
+                dirnav.cmd --cwd-file "$tmp" "$Path"
             } else {
-                & $dirnavCmd --cwd-file="$tmp"
+                dirnav.cmd --cwd-file "$tmp"
             }
         }
+
         if (Test-Path -LiteralPath $tmp) {
-            $raw = Get-Content -LiteralPath $tmp -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+            $raw = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
             if ($null -ne $raw) {
                 $target = $raw.Trim()
                 if ($target -and (Test-Path -LiteralPath $target -PathType Container)) {

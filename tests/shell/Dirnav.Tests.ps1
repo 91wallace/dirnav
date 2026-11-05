@@ -32,29 +32,24 @@ Assert-True ($null -ne $cmdCc) "Comando 'cc' esta registrado nativamente na sess
 Assert-True ($null -ne $cmdDn) "Comando 'dn' esta registrado nativamente na sessao PowerShell"
 Assert-True ($null -ne $cmdDirnav) "Alias 'dirnav' esta registrado na sessao PowerShell"
 
-# Teste 2: Navegacao para diretorios com colchetes e espacos via mock de dirnav.cmd (Bug Critico 6)
-Write-Host "`n[2] Testando navegacao com 'cc' em caminhos contendo colchetes 'Pasta [2026]' e acentos..." -ForegroundColor Yellow
+# Teste 2: Navegacao E2E real com dirnav: voltar 2 diretorios para tras (LEFT, LEFT) e apertar ENTER (Bug Critico 7) + pasta com colchetes e acentos (Bug Critico 6)
+Write-Host "`n[2] Testando navegacao End-to-End real com 'cc' (voltar 2 diretorios com LEFT,LEFT,ENTER e pastas com colchetes)..." -ForegroundColor Yellow
 $TestSandbox = Join-Path ([System.IO.Path]::GetTempPath()) "dirnav-ps-test-$([guid]::NewGuid().ToString('N'))"
-$SpecialDir = Join-Path $TestSandbox "Configurações [2026]"
-New-Item -ItemType Directory -Force -Path $SpecialDir | Out-Null
+$AncestorDir = Join-Path $TestSandbox "Configurações [2026]"
+$DeepDir = Join-Path $AncestorDir "subpasta1\subpasta2"
+New-Item -ItemType Directory -Force -Path $DeepDir | Out-Null
 
 $OrigLocation = Get-Location
 try {
-    # Mock de dirnav.cmd para escrever o caminho especial no --cwd-file
-    function dirnav.cmd {
-        param([string]$Arg1, [string]$Arg2)
-        if ($Arg1 -match "^--cwd-file=(.+)$") {
-            $cwdFile = $Matches[1].Trim('"')
-            [System.IO.File]::WriteAllText($cwdFile, $SpecialDir, [System.Text.Encoding]::UTF8)
-        }
-    }
+    Set-Location -LiteralPath $DeepDir
+    $env:DIRNAV_TEST_KEYS = "LEFT,LEFT,ENTER"
 
     cc
     $CurrentLoc = (Get-Location).Path
-    Assert-True ($CurrentLoc -eq $SpecialDir) "Comando 'cc' mudou com sucesso para pasta com colchetes e acentos: $CurrentLoc"
+    Assert-True ($CurrentLoc -eq $AncestorDir) "Comando 'cc' voltou 2 diretorios e manteve em '$AncestorDir' ao pressionar Enter (Atual: $CurrentLoc)"
 } finally {
+    Remove-Item Env:\DIRNAV_TEST_KEYS -ErrorAction SilentlyContinue
     Set-Location -LiteralPath $OrigLocation.Path
-    Remove-Item -Path Function:\dirnav.cmd -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $TestSandbox) {
         Remove-Item -Recurse -Force -LiteralPath $TestSandbox -ErrorAction SilentlyContinue
     }

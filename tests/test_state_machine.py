@@ -121,3 +121,36 @@ def test_navigation_keys_up_down_home_end_page(dirnav_module, sample_tree):
 
     state.handle_key("UP")
     assert state.selected_idx == 0
+
+
+def test_go_back_multiple_directories_and_press_enter(dirnav_module, tmp_path):
+    """
+    Bug Critico 7:
+    Quando o usuario esta em um diretorio profundo, volta 1 ou mais diretorios
+    para tras (LEFT) e aciona Enter para se manter naquele diretorio,
+    o target_path e o arquivo --cwd-file devem refletir o diretorio ancestral.
+    """
+    deep_path = tmp_path / "nivel1" / "nivel2" / "nivel3"
+    deep_path.mkdir(parents=True)
+
+    state = dirnav_module.NavigatorState(str(deep_path))
+    assert state.current_path == os.path.abspath(str(deep_path))
+
+    # Volta 2 diretorios para tras (nivel3 -> nivel2 -> nivel1)
+    state.handle_key("LEFT")
+    assert state.current_path == os.path.abspath(str(tmp_path / "nivel1" / "nivel2"))
+
+    state.handle_key("LEFT")
+    expected_ancestor = os.path.abspath(str(tmp_path / "nivel1"))
+    assert state.current_path == expected_ancestor
+
+    # Aciona Enter para se manter em nivel1
+    state.handle_key("\n")
+    assert state.finished is True
+    assert state.cancelled is False
+    assert state.target_path == expected_ancestor
+
+    # Grava no --cwd-file e verifica o conteudo exato
+    cwd_file = tmp_path / "out_cwd.tmp"
+    dirnav_module.write_output(state.target_path, str(cwd_file))
+    assert cwd_file.read_text(encoding="utf-8") == os.path.normpath(expected_ancestor)
