@@ -15,13 +15,12 @@
 - 🔍 **Busca e Filtro Interativo em Tempo Real**: Basta digitar qualquer parte do nome da pasta (inclusive com ou sem acentos) para resumir instantaneamente a lista de diretórios.
 - ⌨️ **Navegação Simples e Direta**:
   - `↑` / `↓` — Navega pela lista de pastas
-  - `→` (ou `Tab`) — Entra na subpasta selecionada
+  - `Enter` — **Vai imediatamente para a pasta selecionada** (sem precisar entrar antes)
+  - `→` (ou `Tab`) — Entra na subpasta selecionada para continuar explorando subníveis
   - `←` — Volta um nível (pasta pai)
   - `Digitação Livre (A-Z, 0-9, etc.)` — Filtra as pastas em tempo real
-  - `Backspace` — Apaga caracteres do filtro de pesquisa
-  - `Enter` — **Confirma e mantém no diretório atual** (ou entra na pasta filtrada)
-  - `Esc` — Limpa o filtro ativo (1º toque) ou cancela a operação (2º toque)
-  - `Ctrl+C` — Cancela e mantém o diretório original
+  - `Backspace` — **Confirma e mantém no diretório atual** (ou apaga caracteres se houver pesquisa ativa)
+  - `Esc` / `Ctrl+C` — **Cancela imediatamente** e sai sem nenhuma alteração
 - 🔄 **Integração com Shell**: Altera instantaneamente a pasta atual da sua sessão do shell (`bash`, `zsh` ou `PowerShell 5.1/7+`).
 
 ---

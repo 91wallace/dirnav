@@ -1,23 +1,48 @@
 import os
 
 
-def test_enter_confirms_current_directory_instead_of_q(dirnav_module, sample_tree):
+def test_enter_goes_directly_to_selected_directory(dirnav_module, sample_tree):
     """
-    Requisito do usuario:
-    Em vez de apertar 'q' para se manter no diretorio atual, deve alterar para Enter.
+    Novo requisito do usuario:
+    Quando o usuario apertar Enter, o dirnav deve ir direto para o diretorio
+    que o usuario estiver selecionado, evitando ter que entrar para depois se manter.
     """
     state = dirnav_module.NavigatorState(str(sample_tree))
+    # Seleciona a segunda pasta da lista ('beta')
+    state.handle_key("DOWN")
+    selected_folder = state.filtered_dirs[state.selected_idx]
+    assert selected_folder == "beta"
+
     state.handle_key("\n")
+
+    assert state.finished is True
+    assert state.cancelled is False
+    assert state.target_path == os.path.join(
+        os.path.abspath(str(sample_tree)), selected_folder
+    )
+
+
+def test_backspace_confirms_current_directory_when_search_is_empty(
+    dirnav_module, sample_tree
+):
+    """
+    Novo requisito do usuario:
+    Em vez de Enter para se manter no diretorio atual, o usuario deve usar Backspace.
+    """
+    state = dirnav_module.NavigatorState(str(sample_tree))
+    state.handle_key("\b")
 
     assert state.finished is True
     assert state.cancelled is False
     assert state.target_path == os.path.abspath(str(sample_tree))
 
 
-def test_q_key_is_typed_into_search_and_does_not_exit(dirnav_module, sample_tree):
+def test_q_key_is_typed_into_search_and_enter_goes_to_filtered_dir(
+    dirnav_module, sample_tree
+):
     """
-    Requisito do usuario:
-    O teclado fica liberado (incluindo 'q') para escrever o nome da pasta e resumir a lista.
+    O teclado fica liberado (incluindo 'q') para escrever o nome da pasta,
+    e Enter vai direto para a pasta filtrada selecionada.
     """
     state = dirnav_module.NavigatorState(str(sample_tree))
     state.handle_key("q")
@@ -26,34 +51,42 @@ def test_q_key_is_typed_into_search_and_does_not_exit(dirnav_module, sample_tree
     assert state.search_query == "q"
     assert state.filtered_dirs == ["quill"]
 
-    # Pressionar Enter com filtro ativo seleciona a pasta filtrada
+    # Pressionar Enter vai para a pasta selecionada ('quill')
     state.handle_key("\n")
     assert state.finished is True
     assert state.target_path == os.path.join(os.path.abspath(str(sample_tree)), "quill")
 
 
-def test_backspace_edits_search_without_going_up_directory(dirnav_module, sample_tree):
+def test_backspace_edits_search_first_then_confirms_current_dir_when_empty(
+    dirnav_module, sample_tree
+):
     """
-    Bug Critico 2:
-    Backspace deve apagar letra do filtro e NUNCA subir de diretorio.
+    Quando ha texto digitado na pesquisa, Backspace apaga os caracteres;
+    quando o filtro fica vazio, um novo Backspace confirma o diretorio atual.
     """
     state = dirnav_module.NavigatorState(str(sample_tree))
     initial_path = state.current_path
 
-    for ch in "proj":
+    for ch in "pr":
         state.handle_key(ch)
-    assert state.search_query == "proj"
+    assert state.search_query == "pr"
     assert state.filtered_dirs == ["project-one", "project-two"]
 
+    # Apaga 'r' -> resta 'p'
     state.handle_key("\b")
-    assert state.search_query == "pro"
-    assert state.current_path == initial_path
+    assert state.search_query == "p"
+    assert state.finished is False
 
-    # Mesmo se o filtro estiver vazio, Backspace nao deve subir para o diretorio pai
-    for _ in range(5):
-        state.handle_key("\b")
+    # Apaga 'p' -> filtro fica vazio, mas ainda nao sai
+    state.handle_key("\b")
     assert state.search_query == ""
-    assert state.current_path == initial_path
+    assert state.finished is False
+
+    # Agora com filtro vazio, Backspace confirma o diretorio atual!
+    state.handle_key("\b")
+    assert state.finished is True
+    assert state.cancelled is False
+    assert state.target_path == initial_path
 
 
 def test_right_and_left_arrows_navigate_hierarchy_and_clear_filter(
@@ -79,24 +112,21 @@ def test_right_and_left_arrows_navigate_hierarchy_and_clear_filter(
     assert state.current_path == os.path.abspath(str(sample_tree))
 
 
-def test_esc_clears_search_first_then_cancels_on_second_press(
-    dirnav_module, sample_tree
-):
+def test_esc_exits_immediately_without_any_changes(dirnav_module, sample_tree):
+    """
+    Novo requisito do usuario:
+    O botao ESC sera para o usuario sair sem nenhuma alteracao (mesmo se tiver digitado filtro).
+    """
     state = dirnav_module.NavigatorState(str(sample_tree))
     state.handle_key("a")
     state.handle_key("l")
     assert state.search_query == "al"
 
-    # Primeiro ESC limpa a pesquisa mas continua aberto
-    state.handle_key("ESC")
-    assert state.search_query == ""
-    assert state.finished is False
-    assert state.cancelled is False
-
-    # Segundo ESC cancela e sai
+    # Primeiro ESC ja cancela e sai imediatamente sem nenhuma alteracao
     state.handle_key("ESC")
     assert state.finished is True
     assert state.cancelled is True
+    assert state.target_path is None
 
 
 def test_navigation_keys_up_down_home_end_page(dirnav_module, sample_tree):
@@ -123,11 +153,10 @@ def test_navigation_keys_up_down_home_end_page(dirnav_module, sample_tree):
     assert state.selected_idx == 0
 
 
-def test_go_back_multiple_directories_and_press_enter(dirnav_module, tmp_path):
+def test_go_back_multiple_directories_and_press_backspace(dirnav_module, tmp_path):
     """
-    Bug Critico 7:
     Quando o usuario esta em um diretorio profundo, volta 1 ou mais diretorios
-    para tras (LEFT) e aciona Enter para se manter naquele diretorio,
+    para tras (LEFT) e aciona Backspace para se manter naquele diretorio,
     o target_path e o arquivo --cwd-file devem refletir o diretorio ancestral.
     """
     deep_path = tmp_path / "nivel1" / "nivel2" / "nivel3"
@@ -144,8 +173,8 @@ def test_go_back_multiple_directories_and_press_enter(dirnav_module, tmp_path):
     expected_ancestor = os.path.abspath(str(tmp_path / "nivel1"))
     assert state.current_path == expected_ancestor
 
-    # Aciona Enter para se manter em nivel1
-    state.handle_key("\n")
+    # Aciona Backspace para se manter em nivel1
+    state.handle_key("\b")
     assert state.finished is True
     assert state.cancelled is False
     assert state.target_path == expected_ancestor

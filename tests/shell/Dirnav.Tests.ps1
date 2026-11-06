@@ -32,21 +32,37 @@ Assert-True ($null -ne $cmdCc) "Comando 'cc' esta registrado nativamente na sess
 Assert-True ($null -ne $cmdDn) "Comando 'dn' esta registrado nativamente na sessao PowerShell"
 Assert-True ($null -ne $cmdDirnav) "Alias 'dirnav' esta registrado na sessao PowerShell"
 
-# Teste 2: Navegacao E2E real com dirnav: voltar 2 diretorios para tras (LEFT, LEFT) e apertar ENTER (Bug Critico 7) + pasta com colchetes e acentos (Bug Critico 6)
-Write-Host "`n[2] Testando navegacao End-to-End real com 'cc' (voltar 2 diretorios com LEFT,LEFT,ENTER e pastas com colchetes)..." -ForegroundColor Yellow
+# Teste 2: Navegacao E2E real com dirnav:
+# 2a) Voltar 2 diretorios para tras (LEFT, LEFT) e apertar BACKSPACE para se manter
+# 2b) Apertar ENTER para ir direto para a pasta selecionada
+# 2c) Apertar ESC para sair sem nenhuma alteracao
+Write-Host "`n[2] Testando navegacao End-to-End real com 'cc' (BACKSPACE para manter, ENTER para ir na selecionada, ESC para cancelar)..." -ForegroundColor Yellow
 $TestSandbox = Join-Path ([System.IO.Path]::GetTempPath()) "dirnav-ps-test-$([guid]::NewGuid().ToString('N'))"
 $AncestorDir = Join-Path $TestSandbox "Configurações [2026]"
-$DeepDir = Join-Path $AncestorDir "subpasta1\subpasta2"
+$SubDir1 = Join-Path $AncestorDir "subpasta1"
+$DeepDir = Join-Path $SubDir1 "subpasta2"
 New-Item -ItemType Directory -Force -Path $DeepDir | Out-Null
 
 $OrigLocation = Get-Location
 try {
+    # 2a) Voltar 2 diretorios com LEFT,LEFT e manter com BACKSPACE
     Set-Location -LiteralPath $DeepDir
-    $env:DIRNAV_TEST_KEYS = "LEFT,LEFT,ENTER"
-
+    $env:DIRNAV_TEST_KEYS = "LEFT,LEFT,BACKSPACE"
     cc
     $CurrentLoc = (Get-Location).Path
-    Assert-True ($CurrentLoc -eq $AncestorDir) "Comando 'cc' voltou 2 diretorios e manteve em '$AncestorDir' ao pressionar Enter (Atual: $CurrentLoc)"
+    Assert-True ($CurrentLoc -eq $AncestorDir) "Comando 'cc' voltou 2 diretorios e manteve em '$AncestorDir' ao pressionar Backspace (Atual: $CurrentLoc)"
+
+    # 2b) Pressionar ENTER vai direto para a pasta selecionada ('subpasta1') sem precisar entrar antes
+    $env:DIRNAV_TEST_KEYS = "ENTER"
+    cc
+    $CurrentLoc2 = (Get-Location).Path
+    Assert-True ($CurrentLoc2 -eq $SubDir1) "Comando 'cc' foi direto para a pasta selecionada '$SubDir1' ao pressionar Enter (Atual: $CurrentLoc2)"
+
+    # 2c) Pressionar ESC sai sem nenhuma alteracao mesmo apos navegar/digitar
+    $env:DIRNAV_TEST_KEYS = "s,u,b,ESC"
+    cc
+    $CurrentLoc3 = (Get-Location).Path
+    Assert-True ($CurrentLoc3 -eq $SubDir1) "Comando 'cc' saiu sem nenhuma alteracao ao pressionar ESC (Atual: $CurrentLoc3)"
 } finally {
     Remove-Item Env:\DIRNAV_TEST_KEYS -ErrorAction SilentlyContinue
     Set-Location -LiteralPath $OrigLocation.Path

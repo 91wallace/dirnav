@@ -196,7 +196,7 @@ def read_key(fd):
             elif ch2 == "Q":
                 return "PAGEDOWN"
             elif ch2 == "S":
-                return "\b"  # Delete key
+                return "DELETE"  # Delete key isolada do Backspace
             return ""
         if ch == "\x03":
             return "\x03"
@@ -246,7 +246,7 @@ def read_key(fd):
                 elif seq == b"\x1b[6~":
                     return "PAGEDOWN"
                 elif seq == b"\x1b[3~":
-                    return "\b"
+                    return "DELETE"
                 return ""
             return "ESC"
         if b in (b"\r", b"\n"):
@@ -348,12 +348,8 @@ class NavigatorState:
                     self.refresh_dirs()
 
         elif key in ("\r", "\n"):
-            # Enter: confirma permanencia no diretorio atual (ou na pasta filtrada se o usuario buscou algo)
-            if (
-                self.search_query
-                and self.filtered_dirs
-                and 0 <= self.selected_idx < len(self.filtered_dirs)
-            ):
+            # Enter: vai direto para o diretorio selecionado na lista (evitando precisar entrar antes)
+            if self.filtered_dirs and 0 <= self.selected_idx < len(self.filtered_dirs):
                 candidate = os.path.join(
                     self.current_path, self.filtered_dirs[self.selected_idx]
                 )
@@ -361,12 +357,25 @@ class NavigatorState:
                     self.target_path = candidate
                 else:
                     self.target_path = self.current_path
-            else:
+                self.finished = True
+            elif not self.search_query:
+                # Se a pasta atual nao tiver subpastas e nao houver filtro sem resultado, mantem na atual
                 self.target_path = self.current_path
-            self.finished = True
+                self.finished = True
 
         elif key == "\b":
-            # Backspace: apaga exclusivamente caracteres do filtro de pesquisa (Bug Critico 2 resolvido)
+            # Backspace: se houver pesquisa ativa, apaga o ultimo caractere;
+            # se nao houver pesquisa, confirma e mantem no diretorio atual (current_path)
+            if self.search_query:
+                self.search_query = self.search_query[:-1]
+                self.selected_idx = 0
+                self.scroll_offset = 0
+                self.apply_filter()
+            else:
+                self.target_path = self.current_path
+                self.finished = True
+
+        elif key == "DELETE":
             if self.search_query:
                 self.search_query = self.search_query[:-1]
                 self.selected_idx = 0
@@ -394,19 +403,10 @@ class NavigatorState:
                 )
                 self.apply_filter()
 
-        elif key == "ESC":
-            # Se houver filtro ativo, primeiro ESC limpa o filtro; segundo ESC cancela a operacao
-            if self.search_query:
-                self.search_query = ""
-                self.selected_idx = 0
-                self.scroll_offset = 0
-                self.apply_filter()
-            else:
-                self.cancelled = True
-                self.finished = True
-
-        elif key == "\x03":
+        elif key in ("ESC", "\x03"):
+            # ESC ou Ctrl+C: sai imediatamente sem nenhuma alteracao
             self.cancelled = True
+            self.target_path = None
             self.finished = True
 
         elif len(key) == 1 and key.isprintable():
