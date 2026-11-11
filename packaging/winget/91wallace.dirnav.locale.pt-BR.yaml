@@ -9,14 +9,12 @@ PackageName: dirnav
 PackageUrl: https://github.com/91wallace/dirnav
 License: MIT
 LicenseUrl: https://github.com/91wallace/dirnav/blob/main/LICENSE
-ShortDescription: Navegador de diretorios inline ultrarrapido para terminal com busca em tempo real (PowerShell 7, Bash, Zsh)
+ShortDescription: Navegador de diretorios inline para PowerShell; wrappers CMD sao distribuidos no ZIP Windows
 Tags:
   - cli
   - directory
   - navigator
   - terminal
   - powershell
-  - cc
-  - dn
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

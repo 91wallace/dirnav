@@ -41,6 +41,9 @@ for arg in "$@"; do
             ;;
     esac
 done
+if [ -n "${MOCK_EXIT_CODE:-}" ]; then
+    exit "$MOCK_EXIT_CODE"
+fi
 EOF
 chmod +x "$MOCK_BIN/dirnav"
 
@@ -54,4 +57,19 @@ if [ "$PWD" != "$SPECIAL_SUBDIR" ]; then
     exit 1
 fi
 echo "  [PASS] Funcao 'dn' mudou com sucesso para diretorio com espacos e colchetes: $PWD"
+
+# 4. Falhas do binario nao devem aplicar o caminho nem ser ocultadas pela limpeza.
+export MOCK_EXIT_CODE=7
+if dn; then
+    echo "[FAIL] Funcao 'dn' ocultou o codigo de erro do binario"
+    exit 1
+else
+    status=$?
+fi
+if [ "$status" -ne 7 ] || [ "$PWD" != "$SPECIAL_SUBDIR" ]; then
+    echo "[FAIL] Esperado status 7 e PWD preservado; status=$status PWD='$PWD'"
+    exit 1
+fi
+unset MOCK_EXIT_CODE
+echo "  [PASS] Funcao 'dn' preservou o diretorio e propagou status 7"
 echo "==> Todos os testes Bash passaram!"

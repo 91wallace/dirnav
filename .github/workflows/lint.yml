@@ -7,6 +7,50 @@ on:
     branches: [ main, master ]
 
 jobs:
+  shell-integration:
+    name: Bash and Zsh integration (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate Bash and test installers/integration
+        run: |
+          bash -n install.sh uninstall.sh dirnav.sh tests/shell/test_bash.sh tests/shell/test_installers.sh
+          bash tests/shell/test_bash.sh
+          bash tests/shell/test_installers.sh
+
+      - name: Test Zsh integration when available
+        if: runner.os == 'macOS'
+        run: zsh tests/shell/test_zsh.zsh
+
+  arch-package:
+    name: Arch package source, checksum, and build validation
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install runtime build dependency
+        run: pacman -Syu --noconfirm --needed python
+
+      - name: Build package as an unprivileged user
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c 'cd "$GITHUB_WORKSPACE/packaging/arch" && makepkg --syncdeps --noconfirm'
+
   python-lint:
     name: Ruff Lint & Format Check
     runs-on: ubuntu-latest

@@ -1,4 +1,6 @@
 __pycache__/
+.release-work/
+artifacts/beta/
 *.py[cod]
 *$py.class
 *.bak

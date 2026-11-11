@@ -22,7 +22,7 @@
   "bugs": {
     "url": "https://github.com/91wallace/dirnav/issues"
   },
-  "author": "Wallace Ghiraldelli <wgx7426@gmail.com>",
+  "author": "91wallace <29762801+91wallace@users.noreply.github.com>",
   "license": "MIT",
   "bin": {
     "dirnav": "./bin/dirnav-cli.js"
@@ -31,13 +31,13 @@
     "dirnav",
     "dirnav.ps1",
     "dirnav.sh",
-    "bin/",
+    "bin/dirnav-cli.js",
+    "bin/postinstall.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "postinstall": "node ./bin/postinstall.js",
-    "preuninstall": "node ./bin/preuninstall.js",
     "test": "python -m pytest"
   },
   "engines": {

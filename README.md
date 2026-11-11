@@ -4,6 +4,8 @@
 
 `dirnav` permite navegar pelas pastas do seu sistema de forma rápida e visual diretamente abaixo da linha do comando, sem tela cheia e sem poluir o histórico do seu terminal.
 
+Para avaliadores autorizados da beta Windows `1.0.1-beta.1`, consulte o [guia do piloto](docs/pilot/windows-beta-evaluation.md). A beta é compartilhada diretamente; a segurança cross-identity ainda não foi homologada.
+
 ---
 
 ## ✨ Recursos
@@ -38,20 +40,13 @@ npm install -g dirnav
 
 ### Windows via Winget
 
-```powershell
-winget install 91wallace.dirnav
-dirnav --setup
-```
+O pacote Winget ainda não está publicado nem pronto para instalação. A beta controlada é fornecida como ZIP direto; para instalar no perfil do usuário, use `install.ps1`. O Winget rejeita wrappers `.cmd` como aliases portáveis, então sua futura integração não poderá prometer navegação na sessão original do CMD.
 
 ---
 
 ### Arch Linux (AUR / Pacman)
 
-```bash
-yay -S dirnav
-# ou via makepkg:
-cd packaging/arch && makepkg -si
-```
+O recipe Arch/AUR está em estabilização e ainda não foi construído nem instalado em um ambiente Arch. Não há instrução de instalação aprovada para esta versão. O pacote planejado usa integração por usuário via `dirnav --setup` e não altera `/etc/profile.d`; publicação fica bloqueada até o build e os testes de instalação/remoção passarem.
 
 ---
 
@@ -78,6 +73,8 @@ chmod +x install.sh
 ```
 
 *(O instalador perguntará interativamente qual atalho você prefere usar, sugerindo `dn` por padrão para evitar conflitos com o compilador `cc`, ou você pode passar diretamente `./install.sh --shortcut=dn`).*
+
+O script instala somente em `~/.local/bin` e edita apenas perfis do usuário atual. Não o execute com `sudo`; instalações globais existentes de versões antigas não são removidas automaticamente. A integração Bash/Zsh está em estabilização e deve ser validada no sistema-alvo antes de uso amplo; a cobertura local desta linha foi executada em Git Bash no Windows, não em Linux/macOS.
 
 ---
 
@@ -136,6 +133,15 @@ dn ~/projects
 
 ## 🗑️ Desinstalação
 
+### NPM
+
+O npm 7 e versões posteriores não executam scripts de desinstalação do pacote. Remova primeiro a integração do perfil e depois o pacote:
+
+```powershell
+dirnav --uninstall
+npm uninstall -g dirnav
+```
+
 ### Linux/macOS
 
 ```bash
@@ -146,6 +152,8 @@ Ou no repositório clonado:
 ```bash
 ./uninstall.sh
 ```
+
+O desinstalador remove apenas o binário com marcador dirnav em `~/.local/bin` e blocos completos delimitados nos perfis do usuário. Instalações globais antigas devem ser inspecionadas separadamente; o script não remove `/usr/local/bin` nem `/etc/profile.d`.
 
 ### Windows (PowerShell)
 

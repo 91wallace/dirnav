@@ -18,7 +18,7 @@ function Assert-True($Condition, $Message) {
     }
 }
 
-Write-Host "==> Executando Suite de Testes PowerShell 7 (Dirnav)" -ForegroundColor Cyan
+Write-Host "==> Executando Suite de Testes PowerShell $($PSVersionTable.PSVersion) (Dirnav)" -ForegroundColor Cyan
 
 # Teste 1: Carregamento de dirnav.ps1 e disponibilidade nativa de 'cc', 'dn' e 'dirnav'
 Write-Host "`n[1] Testando integracao nativa de comandos (cc, dn, dirnav)..." -ForegroundColor Yellow

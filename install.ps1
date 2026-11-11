@@ -60,26 +60,32 @@ if (Test-Path -LiteralPath $localDirnav) {
     curl.exe -fsSL "$RepoRawUrl/dirnav" -o "$targetScript"
 }
 
-# 4. Cria wrappers executaveis 'dirnav.cmd' e 'cc.cmd'
-# Se chamados com --cwd-file, apenas repassam para o Python;
-# Se chamados diretamente pelo CMD (ou em terminal sem profile carregado), criam temp file e executam cd /d nativo!
+# 4. Cria wrappers executaveis 'dirnav.cmd' e 'cc.cmd'.
+# O wrapper sempre usa um arquivo de resultado; se o chamador tambem passar
+# --cwd-file, esse argumento posterior continua prevalecendo no parser Python.
 $cmdLauncher = Join-Path $InstallDir "dirnav.cmd"
 $cmdContent = @"
 @echo off
-echo %* | findstr /C:"--cwd-file" >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    "$pythonCmd" "$targetScript" %*
-    exit /b %ERRORLEVEL%
-)
-set "DIRNAV_TMP=%TEMP%\dirnav-cmd-%RANDOM%-%RANDOM%.tmp"
-"$pythonCmd" "$targetScript" --cwd-file "%DIRNAV_TMP%" %*
-if exist "%DIRNAV_TMP%" (
-    set /p DIRNAV_TARGET=<"%DIRNAV_TMP%"
-    del /f /q "%DIRNAV_TMP%" >nul 2>&1
-    if defined DIRNAV_TARGET cd /d "%DIRNAV_TARGET%"
-    set "DIRNAV_TARGET="
-)
-set "DIRNAV_TMP="
+setlocal DisableDelayedExpansion
+set "DIRNAV_NONCE="
+for /f %%A in ('$pythonCmd "$targetScript" --cmd-create-temp') do set "DIRNAV_NONCE=%%A"
+if not defined DIRNAV_NONCE goto dirnav_temp_failed
+set "DIRNAV_TMPDIR=%USERPROFILE%\dirnav-cmd-%DIRNAV_NONCE%"
+set "DIRNAV_TMP=%DIRNAV_TMPDIR%\result.cmd"
+for /f "tokens=*" %%A in ('chcp') do set "DIRNAV_CODEPAGE=%%A"
+for %%A in (%DIRNAV_CODEPAGE%) do set "DIRNAV_CODEPAGE=%%A"
+set "DIRNAV_CMD_CODEPAGE=%DIRNAV_CODEPAGE%"
+"$pythonCmd" "$targetScript" --cmd-cwd-file "%DIRNAV_TMP%" %*
+set "DIRNAV_EXIT=%ERRORLEVEL%"
+if not "%DIRNAV_EXIT%"=="0" goto dirnav_no_result
+if not exist "%DIRNAV_TMP%" goto dirnav_no_result
+endlocal & (call "%DIRNAV_TMP%" & if errorlevel 1 (del /f /q "%DIRNAV_TMP%" >nul 2>&1 & rmdir "%DIRNAV_TMPDIR%" >nul 2>&1 & exit /b 1) else (del /f /q "%DIRNAV_TMP%" >nul 2>&1 & rmdir "%DIRNAV_TMPDIR%" >nul 2>&1 & exit /b 0))
+:dirnav_no_result
+del /f /q "%DIRNAV_TMP%" >nul 2>&1
+rmdir "%DIRNAV_TMPDIR%" >nul 2>&1
+endlocal & exit /b %DIRNAV_EXIT%
+:dirnav_temp_failed
+endlocal & exit /b 1
 "@
 [System.IO.File]::WriteAllText($cmdLauncher, $cmdContent)
 

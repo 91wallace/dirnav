@@ -1,21 +1,21 @@
-# Maintainer: Wallace Ghiraldelli <wgx7426@gmail.com>
+# Maintainer: 91wallace <29762801+91wallace@users.noreply.github.com>
 pkgname=dirnav
 pkgver=1.0.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Navegador de diretorios inline ultrarrapido para terminal com busca em tempo real"
 arch=('any')
 url="https://github.com/91wallace/dirnav"
 license=('MIT')
 depends=('python')
 install=dirnav.install
-source=("$pkgname-$pkgver.tar.gz::https://github.com/91wallace/dirnav/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+_sourcecommit=4dd9ad43476b8dbd662ed3c0377987ee4de41ff4
+source=("$pkgname-$pkgver.tar.gz::https://github.com/91wallace/dirnav/archive/$_sourcecommit.tar.gz")
+sha256sums=('38a5a14b3ae69c84358e961a4f93efa991e85e3c4dbb7a78f48992065bc62ef2')
 
 package() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/dirnav-$_sourcecommit"
     install -Dm755 "dirnav" "$pkgdir/usr/bin/dirnav"
     install -Dm644 "dirnav.sh" "$pkgdir/usr/share/dirnav/dirnav.sh"
-    install -Dm644 "dirnav.sh" "$pkgdir/etc/profile.d/dirnav.sh"
     install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
 }
