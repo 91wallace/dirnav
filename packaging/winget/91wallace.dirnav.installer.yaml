@@ -1,4 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+# Draft only: the v1.0.0 asset is not available and the checksum is a placeholder.
+# Do not submit until a published stable ZIP and its verified SHA-256 exist.
 
 PackageIdentifier: 91wallace.dirnav
 PackageVersion: 1.0.0
@@ -7,10 +9,6 @@ NestedInstallerType: portable
 NestedInstallerFiles:
   - RelativeFilePath: dirnav.exe
     PortableCommandAlias: dirnav
-  - RelativeFilePath: cc.cmd
-    PortableCommandAlias: cc
-  - RelativeFilePath: dn.cmd
-    PortableCommandAlias: dn
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/91wallace/dirnav/releases/download/v1.0.0/dirnav-windows-x64.zip

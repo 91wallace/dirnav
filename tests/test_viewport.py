@@ -81,3 +81,20 @@ def test_viewport_empty_and_small_lists(dirnav_module):
 
     sel, off, avail, above, below = dirnav_module.compute_viewport(3, 2, 0, 8)
     assert (sel, off, avail, above, below) == (2, 0, 3, False, False)
+
+
+def test_filesystem_control_characters_are_not_written_as_terminal_escapes(
+    dirnav_module,
+):
+    lines, _, _ = dirnav_module.build_ui_lines(
+        current_path="/tmp/\x1b[2J",
+        items=["safe\x1b[31mNAME"],
+        selected_idx=0,
+        scroll_offset=0,
+        max_lines=8,
+        term_columns=80,
+    )
+    rendered = "\n".join(lines)
+    assert "\x1b[2J" not in rendered
+    assert "\x1b[31m" not in rendered
+    assert "�" in rendered

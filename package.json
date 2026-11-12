@@ -31,13 +31,13 @@
     "dirnav",
     "dirnav.ps1",
     "dirnav.sh",
-    "bin/",
+    "bin/dirnav-cli.js",
+    "bin/postinstall.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "postinstall": "node ./bin/postinstall.js",
-    "preuninstall": "node ./bin/preuninstall.js",
     "test": "python -m pytest"
   },
   "engines": {

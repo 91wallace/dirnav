@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import contextlib
+import ctypes
 import os
 import re
+import secrets
 import shutil
 import signal
 import sys
@@ -29,12 +31,20 @@ def normalize_text(text):
     return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
 
 
+def sanitize_terminal_text(text):
+    """Render control characters visibly so filesystem text cannot emit ANSI."""
+    return "".join(char if char.isprintable() else "�" for char in text)
+
+
 def get_directories(path):
     """Retorna lista ordenada de subpastas visiveis (nao ocultas por '.')."""
     try:
-        entries = os.listdir(path)
-        dirs = [d for d in entries if os.path.isdir(os.path.join(path, d))]
-        dirs = [d for d in dirs if not d.startswith(".")]
+        with os.scandir(path) as entries:
+            dirs = [
+                entry.name
+                for entry in entries
+                if not entry.name.startswith(".") and entry.is_dir(follow_symlinks=True)
+            ]
         return sorted(dirs, key=str.lower)
     except OSError:
         return []
@@ -130,16 +140,19 @@ def build_ui_lines(
     max_name_len = max(10, term_columns - 8)
 
     # Primeira linha: diretorio atual exibido a esquerda (raiz)
+    safe_path = sanitize_terminal_text(current_path)
     curr_disp = (
-        current_path
-        if len(current_path) <= max_name_len
-        else "..." + current_path[-(max_name_len - 3) :]
+        safe_path
+        if len(safe_path) <= max_name_len
+        else "..." + safe_path[-(max_name_len - 3) :]
     )
     lines.append(f"\033[1;36m📁 {curr_disp}\033[0m")
 
     # Segunda linha (se houver filtro ativo): barra de pesquisa
     if search_query:
-        lines.append(f"   \033[1;33m🔍 Filtro: {search_query}_\033[0m")
+        lines.append(
+            f"   \033[1;33m🔍 Filtro: {sanitize_terminal_text(search_query)}_\033[0m"
+        )
 
     if not items:
         if search_query:
@@ -158,7 +171,12 @@ def build_ui_lines(
             actual_idx = scroll_offset + i
             is_selected = actual_idx == selected_idx
             sub_name_len = max(10, term_columns - 10)
-            disp_name = d if len(d) <= sub_name_len else d[: sub_name_len - 3] + "..."
+            safe_name = sanitize_terminal_text(d)
+            disp_name = (
+                safe_name
+                if len(safe_name) <= sub_name_len
+                else safe_name[: sub_name_len - 3] + "..."
+            )
 
             if is_selected:
                 lines.append(f"  \033[7m > {disp_name}/ \033[0m")
@@ -480,15 +498,21 @@ def get_posix_integration_block(shortcut="dn"):
 function {shortcut}() {{
     local tmp
     tmp="$(mktemp -t "dirnav-cwd.XXXXXX")"
-    command dirnav --cwd-file="$tmp" "$@"
-    if [ -s "$tmp" ]; then
+    local dirnav_status=0
+    command dirnav --cwd-file="$tmp" "$@" || dirnav_status=$?
+    local cd_status=0
+    if [ "$dirnav_status" -eq 0 ] && [ -s "$tmp" ]; then
         local target
         target="$(cat "$tmp")"
         if [ -n "$target" ] && [ -d "$target" ]; then
-            builtin cd -- "$target"
+            builtin cd -- "$target" || cd_status=$?
         fi
     fi
-    rm -f "$tmp"
+    rm -f "$tmp" || true
+    if [ "$dirnav_status" -ne 0 ]; then
+        return "$dirnav_status"
+    fi
+    return "$cd_status"
 }}
 alias dirnav={shortcut}
 if ! command -v cc >/dev/null 2>&1 || [ "$(type -t cc 2>/dev/null)" = "alias" ]; then
@@ -604,10 +628,10 @@ def parse_args(argv):
         elif arg in ("--help", "-h"):
             action = "help"
             i += 1
-        elif arg == "--cwd-file" and i + 1 < len(argv):
+        elif arg in ("--cwd-file", "--cmd-cwd-file") and i + 1 < len(argv):
             cwd_file = argv[i + 1]
             i += 2
-        elif arg.startswith("--cwd-file="):
+        elif arg.startswith(("--cwd-file=", "--cmd-cwd-file=")):
             cwd_file = arg.split("=", 1)[1]
             i += 1
         else:
@@ -619,27 +643,412 @@ def parse_args(argv):
     return cwd_file, start_path, action
 
 
-def write_output(target_path, cwd_file, stdout_stream=None):
+def _win32_security_api():
+    if os.name != "nt":
+        raise OSError("CMD secure transport requires Windows")
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("nLength", wintypes.DWORD),
+            ("lpSecurityDescriptor", wintypes.LPVOID),
+            ("bInheritHandle", wintypes.BOOL),
+        ]
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("Sid", wintypes.LPVOID), ("Attributes", wintypes.DWORD)]
+
+    class TokenUser(ctypes.Structure):
+        _fields_ = [("User", SidAndAttributes)]
+
+    class AceHeader(ctypes.Structure):
+        _fields_ = [
+            ("AceType", ctypes.c_ubyte),
+            ("AceFlags", ctypes.c_ubyte),
+            ("AceSize", wintypes.WORD),
+        ]
+
+    class AclSizeInformation(ctypes.Structure):
+        _fields_ = [
+            ("AceCount", wintypes.DWORD),
+            ("AclBytesInUse", wintypes.DWORD),
+            ("AclBytesFree", wintypes.DWORD),
+        ]
+
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetTokenInformation.restype = wintypes.BOOL
+    advapi.ConvertSidToStringSidW.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)]
+    advapi.ConvertSidToStringSidW.restype = wintypes.BOOL
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.DWORD)]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    kernel.CreateDirectoryW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(SecurityAttributes)]
+    kernel.CreateDirectoryW.restype = wintypes.BOOL
+    advapi.GetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.LPVOID)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.GetSecurityDescriptorControl.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    advapi.GetAclInformation.argtypes = [wintypes.LPVOID, wintypes.LPVOID, wintypes.DWORD, ctypes.c_int]
+    advapi.GetAclInformation.restype = wintypes.BOOL
+    advapi.GetAce.argtypes = [wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID)]
+    advapi.GetAce.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel.LocalFree.restype = wintypes.HLOCAL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(SecurityAttributes), wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.WriteFile.argtypes = [wintypes.HANDLE, wintypes.LPCVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    kernel.WriteFile.restype = wintypes.BOOL
+    kernel.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+    kernel.FlushFileBuffers.restype = wintypes.BOOL
+    kernel.DeleteFileW.argtypes = [wintypes.LPCWSTR]
+    kernel.DeleteFileW.restype = wintypes.BOOL
+    kernel.RemoveDirectoryW.argtypes = [wintypes.LPCWSTR]
+    kernel.RemoveDirectoryW.restype = wintypes.BOOL
+    kernel.GetFileAttributesW.argtypes = [wintypes.LPCWSTR]
+    kernel.GetFileAttributesW.restype = wintypes.DWORD
+    return advapi, kernel, SecurityAttributes, TokenUser, AceHeader, AclSizeInformation
+
+
+def _windows_current_user_sid(advapi, kernel, TokenUser):
+    from ctypes import wintypes
+
+    token = wintypes.HANDLE()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        required = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(required))
+        buffer = ctypes.create_string_buffer(required.value)
+        if not advapi.GetTokenInformation(token, 1, buffer, required, ctypes.byref(required)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        sid_ptr = ctypes.cast(buffer, ctypes.POINTER(TokenUser)).contents.User.Sid
+        sid_text = wintypes.LPWSTR()
+        if not advapi.ConvertSidToStringSidW(sid_ptr, ctypes.byref(sid_text)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return sid_text.value
+        finally:
+            kernel.LocalFree(sid_text)
+    finally:
+        kernel.CloseHandle(token)
+
+
+def _windows_security_descriptor(advapi, SecurityAttributes, sddl):
+    from ctypes import wintypes
+
+    descriptor = wintypes.LPVOID()
+    size = wintypes.DWORD()
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, ctypes.byref(descriptor), ctypes.byref(size)
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    attributes = SecurityAttributes(
+        ctypes.sizeof(SecurityAttributes), descriptor, False
+    )
+    return descriptor, attributes
+
+
+def _windows_security_snapshot(advapi, kernel, path, AclSizeInformation, AceHeader):
+    from ctypes import wintypes
+
+    owner = wintypes.LPVOID()
+    dacl = wintypes.LPVOID()
+    descriptor = wintypes.LPVOID()
+    status = advapi.GetNamedSecurityInfoW(
+        path,
+        1,  # SE_FILE_OBJECT
+        0x00000001 | 0x00000004,  # OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+        ctypes.byref(owner),
+        None,
+        ctypes.byref(dacl),
+        None,
+        ctypes.byref(descriptor),
+    )
+    if status:
+        raise ctypes.WinError(status)
+    try:
+        if not dacl.value:
+            raise OSError("object has a NULL DACL")
+        control = wintypes.WORD()
+        revision = wintypes.DWORD()
+        if not advapi.GetSecurityDescriptorControl(
+            descriptor, ctypes.byref(control), ctypes.byref(revision)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        info = AclSizeInformation()
+        if not advapi.GetAclInformation(
+            dacl, ctypes.byref(info), ctypes.sizeof(info), 2
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        def sid_string(sid_ptr):
+            sid_text = wintypes.LPWSTR()
+            if not advapi.ConvertSidToStringSidW(sid_ptr, ctypes.byref(sid_text)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                return sid_text.value
+            finally:
+                kernel.LocalFree(sid_text)
+
+        owner_sid = sid_string(owner)
+        aces = []
+        for index in range(info.AceCount):
+            ace_ptr = wintypes.LPVOID()
+            if not advapi.GetAce(dacl, index, ctypes.byref(ace_ptr)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            header = ctypes.cast(ace_ptr, ctypes.POINTER(AceHeader)).contents
+            if header.AceType != 0:  # only ACCESS_ALLOWED_ACE is accepted
+                raise OSError("unexpected or deny ACE in secure artifact DACL")
+            mask = wintypes.DWORD.from_address(ace_ptr.value + 4).value
+            # ACCESS_ALLOWED_ACE stores the SID inline after its mask, not a pointer.
+            sid_ptr = ace_ptr.value + 8
+            aces.append((sid_string(sid_ptr), mask, header.AceFlags))
+        return owner_sid, bool(control.value & 0x1000), aces
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def _windows_verify_artifact(advapi, kernel, path, owner_sid, expected_aces, is_directory):
+    _, _, _, _, AceHeader, AclSizeInformation = _win32_security_api()
+    actual_owner, protected, actual_aces = _windows_security_snapshot(
+        advapi, kernel, path, AclSizeInformation, AceHeader
+    )
+    if actual_owner != owner_sid:
+        raise OSError("secure artifact owner does not match current user")
+    if not protected:
+        raise OSError("secure artifact DACL is not protected")
+    if sorted(actual_aces) != sorted(expected_aces):
+        raise OSError("secure artifact DACL differs from the explicit allowlist")
+    attributes = kernel.GetFileAttributesW(path)
+    if attributes == 0xFFFFFFFF:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if attributes & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+        raise OSError("secure artifact unexpectedly became a reparse point")
+    if is_directory and not attributes & 0x10:  # FILE_ATTRIBUTE_DIRECTORY
+        raise OSError("secure artifact is not a directory")
+    return actual_aces
+
+
+def create_secure_cmd_temp_directory():
+    """Atomically create and verify the private CMD artifact directory."""
+    if os.name != "nt":
+        raise OSError("secure CMD artifact directories require Windows")
+    root = os.path.abspath(os.environ.get("USERPROFILE", ""))
+    if not root or not os.path.isdir(root):
+        raise OSError("USERPROFILE is missing or unavailable")
+    advapi, kernel, SecurityAttributes, TokenUser, AceHeader, AclSizeInformation = _win32_security_api()
+    user_sid = _windows_current_user_sid(advapi, kernel, TokenUser)
+    system_sid = "S-1-5-18"
+    admin_sid = "S-1-5-32-544"
+    allowed_sids = {user_sid, system_sid, admin_sid}
+    parent_owner, parent_protected, parent_aces = _windows_security_snapshot(
+        advapi, kernel, root, AclSizeInformation, AceHeader
+    )
+    parent_attributes = kernel.GetFileAttributesW(root)
+    if parent_attributes == 0xFFFFFFFF or parent_attributes & 0x400:
+        raise OSError("USERPROFILE parent is unavailable or a reparse point")
+    if not parent_protected:
+        raise OSError("USERPROFILE parent DACL is not protected")
+    if parent_owner not in allowed_sids:
+        raise OSError("USERPROFILE owner is outside the trusted SID set")
+    unsafe_parent_mask = 0x00000002 | 0x00000004 | 0x00000010 | 0x00000040 | 0x00000100 | 0x00010000 | 0x00040000 | 0x00080000 | 0x10000000 | 0x40000000
+    if any(sid not in allowed_sids and mask & unsafe_parent_mask for sid, mask, _ in parent_aces):
+        raise OSError("USERPROFILE parent grants write/delete rights to an untrusted SID")
+
+    dir_sddl = f"O:{user_sid}G:SYD:P(A;OICI;FA;;;{user_sid})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+    expected_dir_aces = [
+        (user_sid, 0x001F01FF, 0x03),
+        (system_sid, 0x001F01FF, 0x03),
+        (admin_sid, 0x001F01FF, 0x03),
+    ]
+    descriptor, attributes = _windows_security_descriptor(advapi, SecurityAttributes, dir_sddl)
+    try:
+        for _ in range(20):
+            token = secrets.token_hex(16)
+            path = os.path.join(root, "dirnav-cmd-" + token)
+            if kernel.CreateDirectoryW(path, ctypes.byref(attributes)):
+                try:
+                    _windows_verify_artifact(
+                        advapi, kernel, path, user_sid, expected_dir_aces, True
+                    )
+                    return token
+                except OSError:
+                    kernel.RemoveDirectoryW(path)
+                    raise
+            error = ctypes.get_last_error()
+            if error not in (80, 183):  # ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS
+                raise ctypes.WinError(error)
+        raise FileExistsError("unable to allocate a unique secure CMD directory")
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def _write_secure_cmd_batch(cwd_file, script):
+    advapi, kernel, SecurityAttributes, TokenUser, _, _ = _win32_security_api()
+    user_sid = _windows_current_user_sid(advapi, kernel, TokenUser)
+    path = os.path.abspath(cwd_file)
+    root = os.path.abspath(os.environ.get("USERPROFILE", ""))
+    parent = os.path.dirname(path)
+    base = os.path.basename(parent)
+    try:
+        common = os.path.commonpath([root, parent])
+    except ValueError as exc:
+        raise OSError("CMD artifact path is outside the secure per-user directory") from exc
+    if common.casefold() != root.casefold() or not re.fullmatch(r"dirnav-cmd-[0-9a-f]{32}", base):
+        raise OSError("CMD artifact path is outside the secure per-user directory")
+    expected_dir_aces = [
+        (user_sid, 0x001F01FF, 0x03),
+        ("S-1-5-18", 0x001F01FF, 0x03),
+        ("S-1-5-32-544", 0x001F01FF, 0x03),
+    ]
+    _windows_verify_artifact(advapi, kernel, parent, user_sid, expected_dir_aces, True)
+    file_sddl = f"O:{user_sid}G:SYD:P(A;;FA;;;{user_sid})(A;;FA;;;SY)(A;;FA;;;BA)"
+    expected_file_aces = [
+        (user_sid, 0x001F01FF, 0),
+        ("S-1-5-18", 0x001F01FF, 0),
+        ("S-1-5-32-544", 0x001F01FF, 0),
+    ]
+    descriptor, attributes = _windows_security_descriptor(advapi, SecurityAttributes, file_sddl)
+    from ctypes import wintypes
+
+    handle = wintypes.HANDLE(-1).value
+    created = False
+    try:
+        handle = kernel.CreateFileW(path, 0x40000000, 0, ctypes.byref(attributes), 1, 0x100, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        created = True
+        payload = script.encode("utf-8")
+        offset = 0
+        while offset < len(payload):
+            written = wintypes.DWORD()
+            block = payload[offset:]
+            buffer = ctypes.create_string_buffer(block)
+            if not kernel.WriteFile(handle, buffer, len(block), ctypes.byref(written), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if written.value == 0:
+                raise OSError("WriteFile returned zero bytes")
+            offset += written.value
+        if not kernel.FlushFileBuffers(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        kernel.CloseHandle(handle)
+        handle = wintypes.HANDLE(-1).value
+        _windows_verify_artifact(advapi, kernel, path, user_sid, expected_file_aces, False)
+    except Exception:
+        if handle != wintypes.HANDLE(-1).value:
+            kernel.CloseHandle(handle)
+        if created:
+            kernel.DeleteFileW(path)
+        raise
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def build_cmd_directory_script(path, codepage):
+    """Build a quoted batch command that changes directory in the caller's CMD."""
+    if any(char in path for char in ('"', "\r", "\n")):
+        raise ValueError("invalid character for a Windows directory path")
+    try:
+        original_codepage = int(codepage)
+    except (TypeError, ValueError):
+        original_codepage = 437
+
+    # Batch expansion remains active inside quotes. Generate separate literal
+    # commands for /V:OFF and /V:ON so carets and exclamation marks survive both
+    # parsers. The temporary probe variable is unpredictable and removed before
+    # returning to the caller's environment.
+    plain_path = path.replace("%", "%%")
+    delayed_chars = []
+    index = 0
+    has_bang = "!" in path
+    while index < len(path):
+        if path[index : index + 2] == "^!":
+            delayed_chars.append("^^^!")
+            index += 2
+        elif path[index] == "^":
+            delayed_chars.append("^^" if has_bang else "^")
+            index += 1
+        elif path[index] == "!":
+            delayed_chars.append("^!")
+            index += 1
+        else:
+            delayed_chars.append("%%" if path[index] == "%" else path[index])
+            index += 1
+    delayed_path = "".join(delayed_chars)
+    probe = "DIRNAV_DELAYED_" + secrets.token_hex(8).upper()
+    return "\r\n".join(
+        (
+            "@echo off",
+            "chcp 65001 >nul",
+            f'set "{probe}=1"',
+            f'if "!{probe}!"=="1" goto dirnav_delayed',
+            f'set "{probe}="',
+            "setlocal DisableDelayedExpansion",
+            f'endlocal & cd /d "{plain_path}"',
+            "goto dirnav_cd_result",
+            ":dirnav_delayed",
+            f'set "{probe}="',
+            "setlocal DisableDelayedExpansion",
+            f'endlocal & cd /d "{delayed_path}"',
+            ":dirnav_cd_result",
+            "if errorlevel 1 goto dirnav_cmd_failed",
+            f"chcp {original_codepage} >nul",
+            "exit /b 0",
+            ":dirnav_cmd_failed",
+            f"chcp {original_codepage} >nul",
+            "exit /b 1",
+            "",
+        )
+    )
+
+
+def write_output(target_path, cwd_file, stdout_stream=None, cmd_escape=False):
     """
     Grava o caminho selecionado.
     Bug Critico 1 e 7 resolvidos: normaliza o caminho com abspath/normpath e,
     se cwd_file foi fornecido, grava EXCLUSIVAMENTE nele em UTF-8 sem BOM.
     """
     if not target_path:
-        return
+        return True
 
     norm_target = os.path.normpath(os.path.abspath(target_path))
 
     if cwd_file:
-        with contextlib.suppress(OSError), open(cwd_file, "w", encoding="utf-8") as f:
-            f.write(norm_target)
+        try:
+            if cmd_escape:
+                script = build_cmd_directory_script(
+                    norm_target, os.environ.get("DIRNAV_CMD_CODEPAGE", "437")
+                )
+                _write_secure_cmd_batch(cwd_file, script)
+            else:
+                with open(cwd_file, "w", encoding="utf-8", newline="") as f:
+                    f.write(norm_target)
+        except OSError as exc:
+            print(f"dirnav: nao foi possivel gravar o caminho selecionado: {exc}", file=sys.stderr)
+            return False
     else:
         out = stdout_stream if stdout_stream is not None else sys.stdout
         out.write(norm_target + "\n")
         out.flush()
+    return True
 
 
 def main():
+    if sys.argv[1:] == ["--cmd-create-temp"]:
+        try:
+            print(create_secure_cmd_temp_directory())
+        except OSError as exc:
+            print(f"dirnav: nao foi possivel criar diretorio CMD seguro: {exc}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
     parsed = parse_args(sys.argv)
     if len(parsed) == 3:
         cwd_file, start_path, action = parsed
@@ -796,8 +1205,16 @@ def main():
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         clear_ui()
 
-        if not state.cancelled and state.target_path:
-            write_output(state.target_path, cwd_file)
+        if (
+            not state.cancelled
+            and state.target_path
+            and not write_output(
+                state.target_path,
+                cwd_file,
+                cmd_escape="--cmd-cwd-file" in sys.argv,
+            )
+        ):
+            sys.exit(1)
 
 
 if __name__ == "__main__":

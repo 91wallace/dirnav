@@ -1,8 +1,8 @@
 post_install() {
     echo "==> dirnav instalado com sucesso!"
-    echo "    A integracao para Bash foi adicionada em /etc/profile.d/dirnav.sh"
-    echo "    Para ativar na sessao atual (ou no Zsh), execute:"
-    echo "      dirnav --setup && source ~/.bashrc"
+    echo "    Para adicionar a integracao somente ao seu perfil Bash/Zsh, execute:"
+    echo "      dirnav --setup"
+    echo "    Depois abra um novo shell ou recarregue seu perfil."
 }
 
 post_upgrade() {
@@ -10,5 +10,6 @@ post_upgrade() {
 }
 
 post_remove() {
-    echo "==> Para remover integracoes locais de ~/.bashrc ou ~/.zshrc, remova o bloco '# Dirnav shell integration'."
+    echo "==> A remocao do pacote não edita perfis pessoais."
+    echo "    Antes de remover o pacote, execute 'dirnav --uninstall'; se ele já foi removido, apague somente o bloco entre os marcadores Dirnav nos perfis afetados."
 }

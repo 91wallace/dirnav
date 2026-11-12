@@ -7,12 +7,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versao da release (ex: 1.0.0)'
+        description: 'Versao da release (estavel ou beta, ex: 1.0.1-beta.1)'
         required: true
-        default: '1.0.0'
+        default: '1.0.1-beta.1'
+      publish_public_artifacts:
+        description: 'Confirma explicitamente publicação pública (somente tag estável)'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality-gate:
@@ -41,11 +46,16 @@ jobs:
 
   build-and-github-release:
     name: Build Windows Binary & Create GitHub Release
+    # Tag pushes run the quality gate only. The approved beta ZIP is uploaded as-is by the maintainer.
+    if: github.event_name == 'workflow_dispatch'
     needs: quality-gate
     runs-on: windows-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.meta.outputs.version }}
       sha256: ${{ steps.build_zip.outputs.sha256 }}
+      is_stable: ${{ steps.meta.outputs.is_stable }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,14 +63,48 @@ jobs:
       - name: Extract Version
         id: meta
         shell: pwsh
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_INPUT: ${{ github.event.inputs.version }}
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          PUBLISH_PUBLIC: ${{ inputs.publish_public_artifacts }}
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-              $ver = "${{ github.event.inputs.version }}".TrimStart('v')
+          if ($env:RELEASE_EVENT -eq "workflow_dispatch") {
+              $ver = $env:RELEASE_INPUT.TrimStart('v')
           } else {
-              $ver = "${{ github.ref_name }}".TrimStart('v')
+              $ver = $env:RELEASE_REF.TrimStart('v')
+          }
+          if ($ver -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+              throw "Invalid release version: '$ver'"
+          }
+          if ($env:PUBLISH_PUBLIC -eq 'true') {
+              if ($env:RELEASE_EVENT -ne 'workflow_dispatch' -or $env:RELEASE_REF_TYPE -ne 'tag' -or $ver -ne $env:RELEASE_REF.TrimStart('v')) {
+                  throw 'Public publishing requires an explicit manual dispatch on the matching stable version tag.'
+              }
+              if ($ver -notmatch '^\d+\.\d+\.\d+$') { throw 'Public publishing requires a stable version without prerelease.' }
+              $approvalPath = Join-Path $PWD 'docs/security/windows-stable-release-approval.json'
+              if (-not (Test-Path -LiteralPath $approvalPath -PathType Leaf)) { throw 'Windows stable release is blocked: F15 approval receipt is missing.' }
+              $approval = Get-Content -LiteralPath $approvalPath -Raw | ConvertFrom-Json
+              if ($approval.status -ne 'PASS' -or $approval.ownerApproved -ne $true) { throw 'Windows stable release is blocked: F15 is not explicitly approved.' }
+              if ($approval.evidencePath -notmatch '^docs/audit/results/f15-adversarial-[0-9a-f]{32}\.json$') { throw 'Windows stable release is blocked: invalid F15 evidence path.' }
+              $evidencePath = Join-Path $PWD ($approval.evidencePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+              if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) { throw 'Windows stable release is blocked: F15 evidence file is missing.' }
+              $evidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($evidenceHash -ne $approval.evidenceSha256.ToLowerInvariant()) { throw 'Windows stable release is blocked: F15 evidence hash mismatch.' }
+              $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
+              $requiredCriteria = @('Rename', 'ChangeSecureDirectoryOwner', 'Delete', 'ChangeOwner', 'ChangeDacl', 'Edit', 'CreateFile', 'Replace', 'ChangeSecureDirectoryDacl')
+              if ($evidence.Schema -ne 'dirnav-f15-final-v1' -or $evidence.Overall -ne 'PASS' -or $evidence.OwnerSid -eq $evidence.TestUserSid) { throw 'Windows stable release is blocked: F15 receipt is not a passing second-identity run.' }
+              if (@($evidence.WriteBoundaryCriteria).Count -ne $requiredCriteria.Count) { throw 'Windows stable release is blocked: F15 criteria set is incomplete.' }
+              foreach ($criterion in $requiredCriteria) {
+                  $result = @($evidence.WriteBoundaryCriteria | Where-Object { $_.Criterion -eq $criterion })
+                  if ($result.Count -ne 1 -or $result[0].Status -ne 'PASS' -or $null -eq $result[0].ActualAttempt) { throw "Windows stable release is blocked: F15 criterion '$criterion' lacks a passing actual attempt." }
+              }
           }
           Write-Host "Release Version: $ver"
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $isStable = $ver -match '^\d+\.\d+\.\d+$'
+          "is_stable=$($isStable.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -74,27 +118,35 @@ jobs:
         id: build_zip
         shell: pwsh
         run: |
-          Copy-Item dirnav dirnav_entry.py
+          $source = Get-Content dirnav -Raw
+          $source = [regex]::Replace($source, '(?m)^__version__ = ".*"$', "__version__ = `"$ver`"")
+          [System.IO.File]::WriteAllText("$PWD/dirnav_entry.py", $source, [System.Text.UTF8Encoding]::new($false))
           pyinstaller --onefile --name dirnav dirnav_entry.py
           New-Item -ItemType Directory -Force -Path dist/package | Out-Null
           Copy-Item dist/dirnav.exe dist/package/dirnav.exe
 
           $cmdWrapper = @"
           @echo off
-          echo %* | findstr /C:"--cwd-file" >nul 2>&1
-          if %ERRORLEVEL% EQU 0 (
-              "%~dp0dirnav.exe" %*
-              exit /b %ERRORLEVEL%
-          )
-          set "DIRNAV_TMP=%TEMP%\dirnav-cmd-%RANDOM%-%RANDOM%.tmp"
-          "%~dp0dirnav.exe" --cwd-file "%DIRNAV_TMP%" %*
-          if exist "%DIRNAV_TMP%" (
-              set /p DIRNAV_TARGET=<"%DIRNAV_TMP%"
-              del /f /q "%DIRNAV_TMP%" >nul 2>&1
-              if defined DIRNAV_TARGET cd /d "%DIRNAV_TARGET%"
-              set "DIRNAV_TARGET="
-          )
-          set "DIRNAV_TMP="
+          setlocal DisableDelayedExpansion
+          set "DIRNAV_NONCE="
+          for /f %%A in ('"%~dp0dirnav.exe" --cmd-create-temp') do set "DIRNAV_NONCE=%%A"
+          if not defined DIRNAV_NONCE goto dirnav_temp_failed
+          set "DIRNAV_TMPDIR=%USERPROFILE%\dirnav-cmd-%DIRNAV_NONCE%"
+          set "DIRNAV_TMP=%DIRNAV_TMPDIR%\result.cmd"
+          for /f "tokens=*" %%A in ('chcp') do set "DIRNAV_CODEPAGE=%%A"
+          for %%A in (%DIRNAV_CODEPAGE%) do set "DIRNAV_CODEPAGE=%%A"
+          set "DIRNAV_CMD_CODEPAGE=%DIRNAV_CODEPAGE%"
+          "%~dp0dirnav.exe" --cmd-cwd-file "%DIRNAV_TMP%" %*
+          set "DIRNAV_EXIT=%ERRORLEVEL%"
+          if not "%DIRNAV_EXIT%"=="0" goto dirnav_no_result
+          if not exist "%DIRNAV_TMP%" goto dirnav_no_result
+          endlocal & (call "%DIRNAV_TMP%" & if errorlevel 1 (del /f /q "%DIRNAV_TMP%" >nul 2>&1 & rmdir "%DIRNAV_TMPDIR%" >nul 2>&1 & exit /b 1) else (del /f /q "%DIRNAV_TMP%" >nul 2>&1 & rmdir "%DIRNAV_TMPDIR%" >nul 2>&1 & exit /b 0))
+          :dirnav_no_result
+          del /f /q "%DIRNAV_TMP%" >nul 2>&1
+          rmdir "%DIRNAV_TMPDIR%" >nul 2>&1
+          endlocal & exit /b %DIRNAV_EXIT%
+          :dirnav_temp_failed
+          endlocal & exit /b 1
           "@
           [System.IO.File]::WriteAllText("$PWD/dist/package/cc.cmd", $cmdWrapper)
           [System.IO.File]::WriteAllText("$PWD/dist/package/dn.cmd", $cmdWrapper)
@@ -106,8 +158,18 @@ jobs:
           Write-Host "ZIP SHA256: $hash"
           "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+      - name: Upload controlled beta build artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dirnav-${{ steps.meta.outputs.version }}-windows-x64
+          path: |
+            dist/dirnav-windows-x64.zip
+            dist/dirnav.exe
+          if-no-files-found: error
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_public_artifacts == true && startsWith(github.ref, 'refs/tags/v') && steps.meta.outputs.is_stable == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -117,11 +179,17 @@ jobs:
 
   publish-npm:
     name: Publish to NPM
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_public_artifacts == true && startsWith(github.ref, 'refs/tags/v') && needs.build-and-github-release.outputs.is_stable == 'true'
     needs: build-and-github-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -132,16 +200,30 @@ jobs:
       - name: Sync Version & Publish to NPM
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.build-and-github-release.outputs.version }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
             echo "::warning::Secret NPM_TOKEN nao configurado. Pulando publicacao no NPM."
             exit 0
           fi
-          npm version "${{ needs.build-and-github-release.outputs.version }}" --no-git-tag-version --allow-same-version
+          python - <<'PY'
+          import os, pathlib, re
+          version = os.environ["RELEASE_VERSION"]
+          if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?", version):
+              raise SystemExit("invalid release version")
+          source = pathlib.Path("dirnav")
+          text = source.read_text(encoding="utf-8")
+          updated, count = re.subn(r'(?m)^__version__ = ".*"$', f'__version__ = "{version}"', text)
+          if count != 1:
+              raise SystemExit("expected one Python CLI version declaration")
+          source.write_text(updated, encoding="utf-8")
+          PY
+          npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
           npm publish --access public
 
   publish-aur:
     name: Publish to Arch Linux AUR (Pacman)
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_public_artifacts == true && startsWith(github.ref, 'refs/tags/v') && needs.build-and-github-release.outputs.is_stable == 'true'
     needs: build-and-github-release
     runs-on: ubuntu-latest
     steps:
@@ -162,11 +244,22 @@ jobs:
 
       - name: Update PKGBUILD version
         if: steps.check_aur.outputs.has_key == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.build-and-github-release.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
         run: |
-          VER="${{ needs.build-and-github-release.outputs.version }}"
+          VER="$RELEASE_VERSION"
+          COMMIT="$SOURCE_COMMIT"
+          ARCHIVE="$RUNNER_TEMP/dirnav-${VER}-${COMMIT}.tar.gz"
+          curl -fsSL "https://github.com/91wallace/dirnav/archive/${COMMIT}.tar.gz" -o "$ARCHIVE"
+          SHA256="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
           sed -i "s/^pkgver=.*/pkgver=${VER}/" packaging/arch/PKGBUILD
+          sed -i "s/^_sourcecommit=.*/_sourcecommit=${COMMIT}/" packaging/arch/PKGBUILD
+          sed -i "s#^source=.*#source=(\"dirnav-${VER}.tar.gz::https://github.com/91wallace/dirnav/archive/${COMMIT}.tar.gz\")#" packaging/arch/PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" packaging/arch/PKGBUILD
           sed -i "s/pkgver = .*/pkgver = ${VER}/" packaging/arch/.SRCINFO
-          sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${VER}/g" packaging/arch/.SRCINFO
+          sed -i "s#^\\([[:space:]]*source = \\).*#\\1dirnav-${VER}.tar.gz::https://github.com/91wallace/dirnav/archive/${COMMIT}.tar.gz#" packaging/arch/.SRCINFO
+          sed -i "s/sha256sums = .*/sha256sums = ${SHA256}/" packaging/arch/.SRCINFO
 
       - name: Push to AUR
         if: steps.check_aur.outputs.has_key == 'true'
@@ -182,6 +275,7 @@ jobs:
 
   publish-winget:
     name: Publish to Windows Package Manager (Winget)
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_public_artifacts == true && startsWith(github.ref, 'refs/tags/v') && needs.build-and-github-release.outputs.is_stable == 'true'
     needs: build-and-github-release
     runs-on: windows-latest
     steps:

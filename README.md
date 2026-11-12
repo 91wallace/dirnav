@@ -1,165 +1,78 @@
-# 📂 dirnav
+# dirnav
 
-> Navegador de diretórios inline, minimalista e ultrarrápido para terminal, em **Python puro**.
+Navegação interativa de diretórios para terminal, escrita em Python. O dirnav exibe uma lista filtrável de pastas no próprio terminal e permite mudar o diretório da sessão do shell.
 
-`dirnav` permite navegar pelas pastas do seu sistema de forma rápida e visual diretamente abaixo da linha do comando, sem tela cheia e sem poluir o histórico do seu terminal.
+[English README](README.en.md) | [Release Windows 1.0.1-beta.1](https://github.com/91wallace/dirnav/releases/tag/v1.0.1-beta.1)
 
----
+> **Estado da versão:** a versão pública `1.0.1-beta.1` é uma beta experimental para Windows x64, destinada a avaliadores selecionados. Não é uma versão estável nem foi aprovada para distribuição geral ou ambientes críticos.
 
-## ✨ Recursos
+## Recursos
 
-- 🚀 **Modo Inline (Sem Tela Cheia)**: Funciona diretamente abaixo da linha de comando, sem limpar o terminal nem perder seu contexto de tela.
-- 🎯 **Apenas Diretórios**: Exibe única e exclusivamente as pastas do diretório atual. Sem poluição com opções extras desnecessárias.
-- ⚡ **Zero Dependências**: Feito em Python 3 puro utilizando apenas módulos da biblioteca padrão (suporta Linux, macOS e Windows com `msvcrt`).
-- 🌐 **Comandos Nativos `cc`, `dn` e `dirnav`**: Disponíveis nativamente no PowerShell 7+, Windows PowerShell 5.1, CMD, Bash e Zsh.
-- 🔍 **Busca e Filtro Interativo em Tempo Real**: Basta digitar qualquer parte do nome da pasta (inclusive com ou sem acentos) para resumir instantaneamente a lista de diretórios.
-- ⌨️ **Navegação Simples e Direta**:
-  - `↑` / `↓` — Navega pela lista de pastas
-  - `Enter` — **Vai imediatamente para a pasta selecionada** (sem precisar entrar antes)
-  - `→` (ou `Tab`) — Entra na subpasta selecionada para continuar explorando subníveis
-  - `←` — Volta um nível (pasta pai)
-  - `Digitação Livre (A-Z, 0-9, etc.)` — Filtra as pastas em tempo real
-  - `Backspace` — **Confirma e mantém no diretório atual** (ou apaga caracteres se houver pesquisa ativa)
-  - `Esc` / `Ctrl+C` — **Cancela imediatamente** e sai sem nenhuma alteração
-- 🔄 **Integração com Shell**: Altera instantaneamente a pasta atual da sua sessão do shell (`bash`, `zsh` ou `PowerShell 5.1/7+`).
+- Navegação inline, sem interface de tela cheia.
+- Filtro de diretórios enquanto você digita.
+- Seleção com Enter; navegação entre níveis e cancelamento com Esc.
+- Integração para alterar a localização da sessão em CMD e PowerShell.
+- Código Python que usa a biblioteca padrão, sem dependências externas de runtime para a aplicação.
 
----
+## Compatibilidade e estado de validação
 
-## 📦 Instalação
+| Ambiente | Estado |
+| --- | --- |
+| Windows x64, CMD | Incluído na beta; testes locais em `cmd.exe` real. |
+| Windows PowerShell 5.1 e PowerShell 7 | Incluídos no escopo da beta; integração temporária descrita no guia. |
+| Linux e macOS | Não homologados. |
+| Bash e Zsh | Em estabilização; testes em Git Bash no Windows não equivalem a homologação Linux/macOS. |
+| Arch/AUR, Winget e npm | Não fazem parte da beta Windows publicada; não instalar como pacotes aprovados. |
 
-### Multiplataforma via NPM (Windows, Linux, macOS)
+A beta não deve ser usada em ambientes críticos. A avaliação positiva externa foi informada pelo proprietário, mas não há relatórios detalhados ou métricas publicados neste repositório.
 
-```bash
-npm install -g dirnav
-```
-*(Configura automaticamente os comandos `cc`, `dn` e `dirnav` no seu perfil do PowerShell, Bash ou Zsh!)*
+## Instalar a beta Windows
 
----
-
-### Windows via Winget
+Baixe apenas o ZIP e `SHA256SUMS.txt` da [release 1.0.1-beta.1](https://github.com/91wallace/dirnav/releases/tag/v1.0.1-beta.1). Confira o hash antes de extrair ou executar:
 
 ```powershell
-winget install 91wallace.dirnav
-dirnav --setup
+$Zip = Join-Path $HOME 'Downloads\dirnav-1.0.1-beta.1-windows-x64.zip'
+$Expected = '9fecce9624d1a81d448fe7060fcbded7a13acccff1862816e19bae31dd322077'
+$Actual = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($Actual -ne $Expected) { throw 'SHA-256 divergente; não execute o pacote.' }
 ```
 
----
+Extraia o arquivo para uma pasta dedicada do seu usuário, por exemplo `%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1`. Para iniciar a navegação no CMD, use `call` na mesma sessão:
 
-### Arch Linux (AUR / Pacman)
-
-```bash
-yay -S dirnav
-# ou via makepkg:
-cd packaging/arch && makepkg -si
+```cmd
+call "%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1\cc.cmd"
 ```
 
----
+O [guia de avaliação](docs/pilot/windows-beta-evaluation.md) contém instruções para CMD, Windows PowerShell 5.1 e PowerShell 7, além de uma lista de testes de seleção, cancelamento e metacaracteres.
 
-### Linux e macOS (Bash / Zsh via Script)
+### Desinstalar a beta Windows
 
-#### Opção 1: Comando único via `curl` (Recomendado)
+Feche as sessões de teste e remova somente a pasta dedicada que você criou para a extração, por exemplo `%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1`. Confira o caminho antes de apagá-lo. A beta ZIP não instala serviços nem exige alteração de perfil ou PATH.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/91wallace/dirnav/main/install.sh | bash
-```
+## Limitações de segurança e caminhos
 
-Após a instalação, reinicie o terminal ou execute:
-```bash
-source ~/.bashrc  # ou source ~/.zshrc
-```
+- A homologação adversarial F15 com uma segunda identidade Windows padrão não foi realizada. Não está comprovado que outra conta padrão seja impedida de alterar o batch auxiliar temporário.
+- Há uma limitação conhecida com caminhos longos no Windows. Evite árvores de diretórios muito profundas.
+- Linux e macOS ainda não foram homologados.
+- A versão estável Windows permanece **NO-GO** até que a homologação adversarial e os critérios de segurança pendentes sejam concluídos.
 
-#### Opção 2: A partir do repositório clonado
+Consulte [aceitação do risco F15](docs/security/release-risk-acceptance.md), [relatório da release](docs/release/publication-v1.0.1-beta.1.md) e [matriz de testes](docs/audit/test-matrix.md) para o escopo e as evidências disponíveis.
 
-```bash
-git clone https://github.com/91wallace/dirnav.git
-cd dirnav
-chmod +x install.sh
-./install.sh
-```
+## Desenvolvimento
 
-*(O instalador perguntará interativamente qual atalho você prefere usar, sugerindo `dn` por padrão para evitar conflitos com o compilador `cc`, ou você pode passar diretamente `./install.sh --shortcut=dn`).*
-
----
-
-### Windows (PowerShell 5.1 / PowerShell 7+)
-
-#### Opção 1: Comando único via PowerShell (Recomendado)
-
-Abra o PowerShell e execute:
+Requisitos para executar os testes Python: Python 3 e `pytest`; Ruff é usado para lint.
 
 ```powershell
-irm https://raw.githubusercontent.com/91wallace/dirnav/main/install.ps1 | iex
+py -3 -m pytest -q -rs
+py -3 -m ruff check dirnav tests/
 ```
 
-Após a instalação, recarregue o perfil ou reinicie o terminal:
-```powershell
-. $PROFILE
-```
+Os testes específicos de shell e instaladores estão em `tests/shell/`. Consulte a documentação de auditoria antes de interpretar testes simulados como validação de um sistema operacional nativo.
 
-#### Opção 2: A partir do repositório clonado
+## Segurança e relatos de problemas
 
-```powershell
-git clone https://github.com/91wallace/dirnav.git
-cd dirnav
-.\install.ps1
-```
+Não envie tokens, credenciais, perfis completos, caminhos pessoais ou conteúdo de arquivos temporários em issues. Revise e remova dados sensíveis dos diagnósticos antes de compartilhá-los. O [modelo de feedback do piloto](docs/pilot/feedback-template.md) explica quais resultados são úteis sem coletar dados automaticamente. O dirnav não envia telemetria.
 
-*(O instalador copia o executável para `%LOCALAPPDATA%\Programs\dirnav`, adiciona-o ao seu `PATH` e registra a função `dn` e o alias `dirnav` no `$PROFILE`).*
-
----
-
-## 🚀 Como Usar
-
-No terminal, basta digitar:
-
-```bash
-dn
-```
-*(ou se preferir, `dirnav` ou o legado `cc` mantido por compatibilidade)*
-
-Também é possível passar uma pasta inicial:
-
-```bash
-dn ~/projects
-```
-
----
-
-## ⚙️ Como Funciona
-
-1. Ao executar `cc` ou `dn`, uma função no seu shell cria um arquivo temporário e aciona o script executável `dirnav`.
-2. A interface interativa desenha a lista de pastas logo abaixo da linha digitada.
-3. Você navega com as setas (`←` / `→` / `↑` / `↓`), digita para filtrar pastas em tempo real e confirma o diretório desejado com `Enter`.
-4. O shell lê o caminho retornado e executa `Set-Location -LiteralPath` (no PowerShell) ou `cd` (no Bash/Zsh/CMD), atualizando o seu prompt na nova pasta de destino.
-
----
-
-## 🗑️ Desinstalação
-
-### Linux/macOS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/91wallace/dirnav/main/uninstall.sh | bash
-```
-
-Ou no repositório clonado:
-```bash
-./uninstall.sh
-```
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/91wallace/dirnav/main/uninstall.ps1 | iex
-```
-
-Ou no repositório clonado:
-```powershell
-.\uninstall.ps1
-```
-
----
-
-## 📄 Licença
+## Licença
 
 Distribuído sob a licença [MIT](LICENSE).

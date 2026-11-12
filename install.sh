@@ -1,215 +1,189 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 REPO_RAW_URL="https://raw.githubusercontent.com/91wallace/dirnav/main"
-BIN_DIR="/usr/local/bin"
-
-# Cores para output
-GREEN='\033[0;32m'
-BLUE='\033[0;36m'
-YELLOW='\033[1;33m'
-GRAY='\033[0;90m'
-RED='\033[0;31m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-echo -e "${BLUE}${BOLD}==> Instalador do dirnav (Linux/macOS)${NC}"
-
-# 0. Leitura de argumentos opcionais (--shortcut=..., -s ..., -y, --default)
+BIN_DIR="${HOME:?HOME is required}/.local/bin"
 USER_SHORTCUT=""
 NON_INTERACTIVE=0
-while [ $# -gt 0 ]; do
+
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+fail() { printf '%b\n' "${RED}[ERRO] $*${NC}" >&2; exit 1; }
+
+while (($#)); do
     case "$1" in
-        --shortcut=*|--alias=*)
-            USER_SHORTCUT="${1#*=}"
-            shift
-            ;;
+        --shortcut=*|--alias=*) USER_SHORTCUT="${1#*=}"; shift ;;
         -s|-a|--shortcut|--alias)
-            USER_SHORTCUT="$2"
-            shift 2
-            ;;
-        -y|--yes|--default|--non-interactive)
-            NON_INTERACTIVE=1
-            shift
-            ;;
-        *)
-            shift
-            ;;
+            (($# >= 2)) || fail "Falta o valor de $1"
+            USER_SHORTCUT="$2"; shift 2 ;;
+        -y|--yes|--default|--non-interactive) NON_INTERACTIVE=1; shift ;;
+        -h|--help)
+            printf 'Uso: %s [--shortcut NOME] [--non-interactive]\n' "$0"
+            printf 'Instala somente no usuário atual em ~/.local/bin.\n'
+            exit 0 ;;
+        *) fail "Argumento desconhecido: $1" ;;
     esac
 done
 
-# 1. Verifica Python 3
-if ! command -v python3 >/dev/null 2>&1; then
-    echo -e "${RED}Erro: Python 3 nao foi encontrado no PATH. Por favor, instale o Python 3 antes de continuar.${NC}" >&2
-    exit 1
+if [[ "$(id -u)" == 0 ]]; then
+    fail "Não execute como root/sudo. Este instalador altera somente o HOME do usuário atual."
 fi
+command -v python3 >/dev/null 2>&1 || fail "Python 3 não foi encontrado no PATH."
+PYTHON_VERSION="$(python3 --version 2>&1)" || fail "python3 não inicia corretamente: $PYTHON_VERSION"
+[[ "$PYTHON_VERSION" == Python\ 3.* ]] || fail "python3 não é uma instalação funcional do Python 3: $PYTHON_VERSION"
 
-# Detecta se precisa de sudo para instalar em /usr/local/bin
-SUDO=""
-if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-        SUDO="sudo"
-    else
-        BIN_DIR="$HOME/.local/bin"
+if [[ -z "$USER_SHORTCUT" && "$NON_INTERACTIVE" -eq 0 ]]; then
+    if [[ -t 0 || -r /dev/tty ]]; then
+        printf 'Atalho principal [dn]: '
+        read -r USER_SHORTCUT < /dev/tty || USER_SHORTCUT=""
     fi
 fi
+USER_SHORTCUT="${USER_SHORTCUT:-dn}"
+[[ "$USER_SHORTCUT" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]] || fail "Nome de atalho inválido: $USER_SHORTCUT"
 
-# 2. Cria diretorio de destino caso nao exista
-if [ ! -d "$BIN_DIR" ]; then
-    $SUDO mkdir -p "$BIN_DIR"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/dirnav-source.XXXXXX")"
+STAGED_FILE=""
+cleanup() {
+    rm -f "$SOURCE_FILE"
+    [[ -z "$STAGED_FILE" ]] || rm -f "$STAGED_FILE"
+}
+trap cleanup EXIT HUP INT TERM
 
-# 3. Instala o executável dirnav
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
-if [ -f "$SCRIPT_DIR/dirnav" ]; then
-    tr -d '\r' < "$SCRIPT_DIR/dirnav" | $SUDO tee "$BIN_DIR/dirnav" >/dev/null
-elif [ -f "./dirnav" ]; then
-    tr -d '\r' < "./dirnav" | $SUDO tee "$BIN_DIR/dirnav" >/dev/null
+if [[ -f "$SCRIPT_DIR/dirnav" ]]; then
+    tr -d '\r' < "$SCRIPT_DIR/dirnav" > "$SOURCE_FILE"
 else
-    echo -e "${GRAY}Baixando dirnav de $REPO_RAW_URL/dirnav...${NC}"
-    curl -fsSL "$REPO_RAW_URL/dirnav" | tr -d '\r' | $SUDO tee "$BIN_DIR/dirnav" >/dev/null
+    curl -fsSL "$REPO_RAW_URL/dirnav" | tr -d '\r' > "$SOURCE_FILE"
 fi
 
-$SUDO chmod +x "$BIN_DIR/dirnav"
-echo -e "${GREEN}[✓] Executavel instalado em: $BIN_DIR/dirnav${NC}"
-
-# 4. Escolha interativa do comando de atalho
-TTY_IN=""
-if [ -t 0 ]; then
-    TTY_IN="/dev/stdin"
-elif [ -r /dev/tty ]; then
-    TTY_IN="/dev/tty"
+IFS= read -r SHEBANG < "$SOURCE_FILE" || fail "Fonte dirnav vazia."
+[[ "$SHEBANG" == '#!'* ]] || fail "A fonte dirnav não contém shebang válido."
+[[ ! -L "$HOME/.local" && ! -L "$BIN_DIR" ]] || fail "Destino per-user passa por symlink; instalação cancelada."
+mkdir -p "$BIN_DIR"
+TARGET="$BIN_DIR/dirnav"
+if [[ -e "$TARGET" || -L "$TARGET" ]]; then
+    [[ -f "$TARGET" && ! -L "$TARGET" ]] || fail "Destino existente não é um arquivo regular: $TARGET"
+    grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$TARGET" || fail "Destino existente sem marcador dirnav; preservado: $TARGET"
 fi
 
-if [ -z "$USER_SHORTCUT" ] && [ "$NON_INTERACTIVE" -eq 0 ]; then
-    if [ -n "$TTY_IN" ]; then
-        echo ""
-        echo -e "${YELLOW}Configuração do atalho do terminal:${NC}"
-        echo -e "  O atalho padrão anterior era '${RED}cc${NC}', que conflita com o compilador C nativo (/usr/bin/cc)."
-        echo -e "  Recomendamos '${GREEN}dn${NC}' (DirNav), mas você pode definir o comando que preferir."
-        echo ""
+STAGED_FILE="$(mktemp "$BIN_DIR/.dirnav-stage.XXXXXX")"
+{
+    printf '%s\n# DIRNAV_MANAGED_INSTALL\n' "$SHEBANG"
+    tail -n +2 "$SOURCE_FILE"
+} > "$STAGED_FILE"
+chmod 755 "$STAGED_FILE"
+mv -f "$STAGED_FILE" "$TARGET"
+STAGED_FILE=""
 
-        while true; do
-            echo -ne "${BLUE}Qual comando de atalho você deseja usar? [padrão: ${GREEN}dn${BLUE}]: ${NC}"
-            read -r INPUT_CMD < "$TTY_IN" || INPUT_CMD=""
-            INPUT_CMD="$(echo "$INPUT_CMD" | tr -d '[:space:]')"
-            [ -z "$INPUT_CMD" ] && INPUT_CMD="dn"
-
-            if ! [[ "$INPUT_CMD" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
-                echo -e "${RED}Nome invalido. Use apenas letras, numeros e sublinhado/hifen.${NC}"
-                continue
-            fi
-
-            # Checa se conflita com algum comando existente no PATH
-            EXISTING_BIN="$(type -P "$INPUT_CMD" 2>/dev/null || true)"
-            if [ -n "$EXISTING_BIN" ] && [ "$EXISTING_BIN" != "$BIN_DIR/dirnav" ]; then
-                echo -e "${RED}Aviso: '${INPUT_CMD}' ja existe no sistema (${EXISTING_BIN}).${NC}"
-                echo -ne "${YELLOW}Tem certeza que deseja sobrescrever esse comando na sua sessao? (s/N): ${NC}"
-                read -r CONFIRM < "$TTY_IN" || CONFIRM="n"
-                if [[ "$CONFIRM" =~ ^[sSyY] ]]; then
-                    USER_SHORTCUT="$INPUT_CMD"
-                    break
-                else
-                    continue
-                fi
-            else
-                USER_SHORTCUT="$INPUT_CMD"
-                break
-            fi
-        done
-    else
-        USER_SHORTCUT="dn"
-    fi
-fi
-
-if [ -z "$USER_SHORTCUT" ]; then
-    USER_SHORTCUT="dn"
-fi
-
-echo -e "${GREEN}[✓] Atalho definido: ${BOLD}$USER_SHORTCUT${NC}"
-
-# 5. Monta o bloco de integração para o shell
-INTEGRATION_BLOCK="
+INTEGRATION_BLOCK="$(cat <<'EOF'
 # Dirnav shell integration
-function ${USER_SHORTCUT}() {
-    local tmp
-    tmp=\"\$(mktemp -t \"dirnav-cwd.XXXXXX\")\"
-    command dirnav --cwd-file=\"\$tmp\" \"\$@\"
-    if [ -s \"\$tmp\" ]; then
-        local target
-        target=\"\$(cat \"\$tmp\")\"
-        if [ -n \"\$target\" ] && [ -d \"\$target\" ]; then
-            builtin cd -- \"\$target\"
+function __DIRNAV_SHORTCUT__() {
+    local tmp dirnav_status cd_status target
+    tmp="$(mktemp "${TMPDIR:-/tmp}/dirnav-cwd.XXXXXX")" || return 1
+    dirnav_status=0
+    "$HOME/.local/bin/dirnav" --cwd-file="$tmp" "$@" || dirnav_status=$?
+    cd_status=0
+    if [[ "$dirnav_status" -eq 0 && -s "$tmp" ]]; then
+        target=$(cat "$tmp")
+        if [[ -n "$target" && -d "$target" ]]; then
+            builtin cd -- "$target" || cd_status=$?
         fi
     fi
-    rm -f \"\$tmp\"
+    rm -f "$tmp" || true
+    if [[ "$dirnav_status" -ne 0 ]]; then return "$dirnav_status"; fi
+    return "$cd_status"
 }
-"
-
-if [ "$USER_SHORTCUT" != "dirnav" ]; then
-    INTEGRATION_BLOCK="${INTEGRATION_BLOCK}alias dirnav=${USER_SHORTCUT}
-"
-fi
-
-# Se o usuário escolheu outro comando que não dn, e dn estiver livre, adiciona alias dn
-if [ "$USER_SHORTCUT" != "dn" ] && ! command -v dn >/dev/null 2>&1; then
-    INTEGRATION_BLOCK="${INTEGRATION_BLOCK}alias dn=${USER_SHORTCUT}
-"
-fi
-
-# 6. Configura integração no sistema (/etc/profile.d para RHEL/Oracle/Debian/Ubuntu)
-if [ -d "/etc/profile.d" ]; then
-    printf "%s\n" "$INTEGRATION_BLOCK" | $SUDO tee "/etc/profile.d/dirnav.sh" >/dev/null
-    $SUDO chmod +x "/etc/profile.d/dirnav.sh" 2>/dev/null || true
-    echo -e "${GREEN}[✓] Integracao global adicionada em: /etc/profile.d/dirnav.sh${NC}"
-fi
-
-# 7. Detecta o diretório home do usuário real (mesmo executando com sudo)
-TARGET_USER="${SUDO_USER:-$USER}"
-TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6)"
-if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
-    TARGET_HOME="$HOME"
-fi
-
-clean_and_add_rc() {
-    local rc_file="$1"
-    [ -f "$rc_file" ] || return 0
-
-    # Remove integrações antigas de qualquer função do dirnav
-    if grep -q "command dirnav" "$rc_file" || grep -q "# Dirnav shell integration" "$rc_file"; then
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - "$rc_file" << 'EOF'
-import re, sys
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8', errors='replace') as f:
-    content = f.read()
-content = re.sub(r'\n?# Dirnav shell integration\s+function \w+\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias [^\n]+)*\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'\n?function \w+\(\)\s*\{[^\}]*command dirnav[^\}]*\}(?:\s*alias [^\n]+)*\n?', '\n', content, flags=re.DOTALL)
-content = re.sub(r'^\s*alias (?:gg|cc|dir|dirnav|dn)=.*\n?', '', content, flags=re.MULTILINE)
-with open(path, 'w', encoding='utf-8') as f:
-    f.write(content.strip() + '\n' if content.strip() else '')
 EOF
-        fi
-    fi
+)"
+INTEGRATION_BLOCK="${INTEGRATION_BLOCK//__DIRNAV_SHORTCUT__/$USER_SHORTCUT}"
+if [[ "$USER_SHORTCUT" != dirnav ]]; then
+    INTEGRATION_BLOCK+=$'\nalias dirnav='"$USER_SHORTCUT"
+fi
+INTEGRATION_BLOCK+=$'\nif ! command -v cc >/dev/null 2>&1 || [[ $(type -t cc 2>/dev/null || true) == alias ]]; then alias cc='"$USER_SHORTCUT"'; fi'
+INTEGRATION_BLOCK+=$'\n# END Dirnav shell integration'
 
-    printf "%s\n" "$INTEGRATION_BLOCK" >> "$rc_file"
-    echo -e "${GREEN}[✓] Integracao adicionada ao perfil: $rc_file${NC}"
-}
-
-CONFIGURED=0
+TARGET_HOME="$HOME"
+PROFILE_COUNT=0
 for RC in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.bash_profile"; do
-    if [ -f "$RC" ]; then
-        clean_and_add_rc "$RC"
-        CONFIGURED=1
-    fi
+    [[ -f "$RC" ]] || continue
+    [[ ! -L "$RC" ]] || fail "Perfil é symlink e foi preservado: $RC"
+    python3 - "$RC" "$INTEGRATION_BLOCK" <<'PY'
+import os, stat, sys, tempfile
+
+path, block = sys.argv[1:]
+if os.path.islink(path):
+    raise SystemExit("perfil é symlink; arquivo preservado")
+start = "# Dirnav shell integration"
+end = "# END Dirnav shell integration"
+with open(path, "r", encoding="utf-8", errors="surrogateescape", newline="") as stream:
+    content = stream.read()
+while start in content or end in content:
+    first = content.find(start)
+    last = content.find(end)
+    if first < 0 or last < first:
+        raise SystemExit("perfil contém bloco dirnav antigo/incompleto; arquivo preservado")
+    last += len(end)
+    if content[last:last + 2] == "\r\n":
+        last += 2
+    elif content[last:last + 1] == "\n":
+        last += 1
+    content = content[:first] + content[last:]
+content = content.rstrip("\r\n")
+content = (content + "\n\n" if content else "") + block + "\n"
+mode = stat.S_IMODE(os.stat(path).st_mode)
+fd, temporary = tempfile.mkstemp(prefix=".dirnav-profile-", dir=os.path.dirname(path))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as stream:
+        stream.write(content)
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
+    raise
+PY
+    ((PROFILE_COUNT+=1))
 done
 
-if [ "$CONFIGURED" -eq 0 ]; then
-    clean_and_add_rc "$TARGET_HOME/.bashrc"
+if ((PROFILE_COUNT == 0)); then
+    if [[ "${SHELL##*/}" == zsh ]]; then
+        RC="$TARGET_HOME/.zshrc"
+    else
+        RC="$TARGET_HOME/.bashrc"
+    fi
+    [[ ! -L "$RC" ]] || fail "Perfil é symlink e foi preservado: $RC"
+    : >> "$RC"
+    python3 - "$RC" "$INTEGRATION_BLOCK" <<'PY'
+import os, stat, sys, tempfile
+path, block = sys.argv[1:]
+if os.path.islink(path):
+    raise SystemExit("perfil é symlink; arquivo preservado")
+with open(path, "r", encoding="utf-8", errors="surrogateescape", newline="") as stream:
+    content = stream.read()
+if "# Dirnav shell integration" in content or "# END Dirnav shell integration" in content:
+    raise SystemExit("perfil contém integração antiga/incompleta; arquivo preservado")
+content = (content.rstrip("\r\n") + "\n\n" if content.strip() else "") + block + "\n"
+mode = stat.S_IMODE(os.stat(path).st_mode)
+fd, temporary = tempfile.mkstemp(prefix=".dirnav-profile-", dir=os.path.dirname(path))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as stream:
+        stream.write(content)
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
+    raise
+PY
 fi
 
-echo ""
-echo -e "${GREEN}Instalacao concluida com sucesso!${NC}"
-echo -e "${YELLOW}Para utilizar na sessao atual:${NC}"
-echo -e "  ${BLUE}source ~/.bashrc${NC}"
-echo -e "${YELLOW}Comando:${NC} ${GREEN}${USER_SHORTCUT}${NC} (ou ${GREEN}dirnav${NC})"
+printf '%b\n' "${GREEN}[OK] dirnav instalado em $TARGET${NC}"
+printf '%b\n' "${BLUE}Integração adicionada somente aos perfis do usuário atual.${NC}"
+printf '%b\n' "${BLUE}Abra um novo Bash/Zsh ou carregue novamente o perfil para usar '$USER_SHORTCUT'.${NC}"
