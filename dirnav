@@ -7,7 +7,20 @@ import secrets
 import shutil
 import signal
 import sys
+import time
 import unicodedata
+
+from dirnav_operations import (
+    OperationCancelled,
+    OperationError,
+    copy_entry,
+    delete_entry,
+    deletion_summary,
+    inspect_entry,
+    move_entry,
+    unique_destination_path,
+    validate_delete_target,
+)
 
 __version__ = "1.0.0"
 
@@ -36,6 +49,40 @@ def sanitize_terminal_text(text):
     return "".join(char if char.isprintable() else "�" for char in text)
 
 
+def terminal_cell_width(text):
+    width = 0
+    for char in text:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+    return width
+
+
+def truncate_text(text, max_cells, from_end=False):
+    if max_cells <= 0:
+        return ""
+    if terminal_cell_width(text) <= max_cells:
+        return text
+    if max_cells <= 3:
+        return "." * max_cells
+    ellipsis = "..."
+    budget = max_cells - len(ellipsis)
+    selected = []
+    used = 0
+    for char in reversed(text) if from_end else text:
+        char_width = 0 if unicodedata.combining(char) else (
+            2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+        )
+        if used + char_width > budget:
+            break
+        selected.append(char)
+        used += char_width
+    if from_end:
+        selected.reverse()
+        return ellipsis + "".join(selected)
+    return "".join(selected) + ellipsis
+
+
 def get_directories(path):
     """Retorna lista ordenada de subpastas visiveis (nao ocultas por '.')."""
     try:
@@ -46,6 +93,24 @@ def get_directories(path):
                 if not entry.name.startswith(".") and entry.is_dir(follow_symlinks=True)
             ]
         return sorted(dirs, key=str.lower)
+    except OSError:
+        return []
+
+
+def get_entries(path):
+    """Return visible files and directories without following links while listing."""
+    try:
+        with os.scandir(path) as entries:
+            directories = []
+            files = []
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                if entry.is_dir(follow_symlinks=True):
+                    directories.append(entry.name)
+                elif entry.is_file(follow_symlinks=False) or entry.is_symlink():
+                    files.append(entry.name)
+        return sorted(directories, key=str.lower) + sorted(files, key=str.lower)
     except OSError:
         return []
 
@@ -126,6 +191,9 @@ def build_ui_lines(
     max_lines,
     term_columns,
     search_query="",
+    footer_text=None,
+    heading=None,
+    status_message="",
 ):
     """Constroi a lista de linhas formatadas com ANSI para renderizacao."""
     (
@@ -137,66 +205,149 @@ def build_ui_lines(
     ) = compute_viewport(len(items), selected_idx, scroll_offset, max_lines)
 
     lines = []
-    max_name_len = max(10, term_columns - 8)
+    max_name_len = max(1, term_columns - (8 if term_columns >= 12 else 1))
 
     # Primeira linha: diretorio atual exibido a esquerda (raiz)
     safe_path = sanitize_terminal_text(current_path)
-    curr_disp = (
-        safe_path
-        if len(safe_path) <= max_name_len
-        else "..." + safe_path[-(max_name_len - 3) :]
-    )
-    lines.append(f"\033[1;36m📁 {curr_disp}\033[0m")
+    curr_disp = truncate_text(safe_path, max_name_len, from_end=True)
+    path_label = f"📁 {curr_disp}" if term_columns >= 4 else curr_disp
+    lines.append(f"\033[1;36m{truncate_text(path_label, term_columns)}\033[0m")
+    if heading:
+        lines.append(f"\033[1;33m{truncate_text(sanitize_terminal_text(heading), term_columns)}\033[0m")
 
     # Segunda linha (se houver filtro ativo): barra de pesquisa
     if search_query:
-        lines.append(
-            f"   \033[1;33m🔍 Filtro: {sanitize_terminal_text(search_query)}_\033[0m"
-        )
+        filter_label = f"Filtro: {sanitize_terminal_text(search_query)}_"
+        lines.append(f"   \033[1;33m{truncate_text(filter_label, max(1, term_columns - 3))}\033[0m")
 
     if not items:
         if search_query:
+            empty_result = f"(nenhum resultado para '{sanitize_terminal_text(search_query)}')"
             lines.append(
-                f"     \033[90m(nenhum resultado para '{search_query}')\033[0m"
+                f"     \033[90m{truncate_text(empty_result, max(1, term_columns - 5))}\033[0m"
             )
         else:
-            lines.append("     \033[90m(nenhuma subpasta)\033[0m")
+            lines.append(f"     \033[90m{truncate_text('(nenhuma subpasta)', max(1, term_columns - 5))}\033[0m")
     else:
         if has_above:
             count_above = scroll_offset
-            lines.append(f"     \033[90m↑ +{count_above} acima...\033[0m")
+            lines.append(f"     \033[90m{truncate_text(f'↑ +{count_above} acima...', max(1, term_columns - 5))}\033[0m")
 
         visible_items = items[scroll_offset : scroll_offset + available_for_items]
         for i, d in enumerate(visible_items):
             actual_idx = scroll_offset + i
             is_selected = actual_idx == selected_idx
-            sub_name_len = max(10, term_columns - 10)
             safe_name = sanitize_terminal_text(d)
-            disp_name = (
-                safe_name
-                if len(safe_name) <= sub_name_len
-                else safe_name[: sub_name_len - 3] + "..."
+            suffix = "/" if os.path.isdir(os.path.join(current_path, d)) else ""
+            prefix = ("  > " if term_columns >= 10 else ">") if is_selected else (
+                "     " if term_columns >= 10 else ""
             )
+            sub_name_len = max(
+                0,
+                term_columns - terminal_cell_width(prefix) - terminal_cell_width(suffix),
+            )
+            disp_name = truncate_text(safe_name, sub_name_len)
 
             if is_selected:
-                lines.append(f"  \033[7m > {disp_name}/ \033[0m")
+                lines.append(f"\033[7m{prefix}{disp_name}{suffix}\033[0m")
             else:
-                lines.append(f"     \033[1;34m{disp_name}/\033[0m")
+                lines.append(f"\033[1;34m{prefix}{disp_name}{suffix}\033[0m")
 
         if has_below:
             count_below = len(items) - (scroll_offset + len(visible_items))
-            lines.append(f"     \033[90m↓ +{count_below} mais...\033[0m")
+            lines.append(f"     \033[90m{truncate_text(f'↓ +{count_below} mais...', max(1, term_columns - 5))}\033[0m")
 
+    if footer_text is not None:
+        if status_message:
+            lines.append(f"\033[33m{truncate_text(sanitize_terminal_text(status_message), term_columns)}\033[0m")
+        lines.append(f"\033[7m{fit_footer(footer_text, term_columns)}\033[0m")
     return lines, selected_idx, scroll_offset
 
 
-def read_key(fd):
+def fit_footer(text, term_columns, context="navigation"):
+    """Fit a plain-text footer into a narrow terminal without splitting ANSI codes."""
+    width = max(1, term_columns)
+    if terminal_cell_width(text) <= width:
+        return text
+    essentials = {
+        "navigation": "F5 F6 F8 ? Esc",
+        "destination": "↑↓ Enter Esc",
+        "confirmation": "Enter Esc",
+        "conflict": "S/R Esc",
+        "help": "Esc",
+    }.get(context, "↑/↓ navegar | Enter abrir | Esc cancelar")
+    if terminal_cell_width(essentials) <= width:
+        return essentials
+    return truncate_text(essentials, width)
+
+
+def build_footer(term_columns, context="navigation"):
+    if context == "destination":
+        text = "↑/↓ navegar | → abrir | Enter usar destino | Esc voltar"
+    elif context == "confirmation":
+        text = "Enter confirmar | Esc cancelar"
+    elif context == "conflict":
+        text = "S substituir | R renomear | Esc cancelar"
+    elif context == "help":
+        text = "Esc ou F1 voltar"
+    else:
+        text = "↑↓ mover | Enter abrir | F5 copiar | F6 mover | F8 excluir | ? ajuda | Esc sair"
+    return fit_footer(text, term_columns, context)
+
+
+def build_help_lines(term_columns, terminal_rows):
+    rows = [
+        "Ajuda do dirnav",
+        "Setas cima/baixo: selecionar | Direita/Tab: entrar | Esquerda: voltar",
+        "Enter: escolher diretorio selecionado | Backspace: filtrar ou confirmar diretorio atual",
+        "F5: copiar item selecionado para um diretorio escolhido",
+        "F6: mover item selecionado para um diretorio escolhido",
+        "F8: excluir item selecionado apos confirmacao permanente",
+        "F1 ou ?: mostrar/fechar ajuda | Esc ou Ctrl+C: cancelar",
+        "As letras, inclusive Q, continuam sendo texto de busca; Q nao encerra a sessao.",
+        "Na escolha do destino: Direita entra e Enter seleciona o diretorio atual.",
+    ]
+    width = max(1, term_columns)
+    usable = max(1, terminal_rows - 1)
+    return [truncate_text(line, width) for line in rows[:usable - 1]] + [
+        build_footer(term_columns, "help")
+    ]
+
+
+def layout_ui_lines(lines, terminal_rows):
+    """Anchor the last line (footer) near the terminal bottom while reserving a prompt row."""
+    if not lines:
+        return []
+    usable_rows = max(1, terminal_rows - 1)
+    if len(lines) > usable_rows:
+        lines = lines[: usable_rows - 1] + [lines[-1]]
+    content, footer = lines[:-1], lines[-1]
+    padding = max(0, usable_rows - len(lines))
+    return content + ([""] * padding) + [footer]
+
+
+def read_key(fd, timeout=None):
     """Le uma tecla do terminal de forma compativel com Windows (UTF-16/UTF-8) e Unix."""
     if IS_WINDOWS:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not msvcrt.kbhit():
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+            time.sleep(0.02)
         # getwch() retorna string Unicode diretamente no Windows, resolvendo acentos e multi-byte
         ch = msvcrt.getwch()
         if ch in ("\x00", "\xe0"):
             ch2 = msvcrt.getwch()
+            function_keys = {
+                59: "F1",
+                63: "F5",
+                64: "F6",
+                66: "F8",
+                133: "F11",
+                134: "F12",
+            }
+            if ord(ch2) in function_keys:
+                return function_keys[ord(ch2)]
             if ch2 == "H":
                 return "UP"
             elif ch2 == "P":
@@ -228,6 +379,10 @@ def read_key(fd):
             return "TAB"
         return ch
     else:
+        if timeout is not None:
+            ready, _, _ = select.select([fd], [], [], timeout)
+            if not ready:
+                return None
         b = os.read(fd, 1)
         if not b:
             return ""
@@ -265,6 +420,14 @@ def read_key(fd):
                     return "PAGEDOWN"
                 elif seq == b"\x1b[3~":
                     return "DELETE"
+                elif seq in (b"\x1bOP", b"\x1b[11~"):
+                    return "F1"
+                elif seq == b"\x1b[15~":
+                    return "F5"
+                elif seq == b"\x1b[17~":
+                    return "F6"
+                elif seq == b"\x1b[19~":
+                    return "F8"
                 return ""
             return "ESC"
         if b in (b"\r", b"\n"):
@@ -304,12 +467,13 @@ class NavigatorState:
         self.cancelled = False
         self.finished = False
         self.target_path = None
+        self.status_message = ""
         self.all_dirs = []
         self.filtered_dirs = []
         self.refresh_dirs()
 
     def refresh_dirs(self):
-        self.all_dirs = get_directories(self.current_path)
+        self.all_dirs = get_entries(self.current_path)
         self.apply_filter()
 
     def apply_filter(self):
@@ -331,6 +495,7 @@ class NavigatorState:
         """Processa uma tecla e atualiza o estado."""
         if not key:
             return
+        self.status_message = ""
 
         if key == "UP":
             if self.selected_idx > 0:
@@ -364,6 +529,8 @@ class NavigatorState:
                     self.selected_idx = 0
                     self.scroll_offset = 0
                     self.refresh_dirs()
+                else:
+                    self.status_message = "Arquivo selecionado. Use F5, F6 ou F8."
 
         elif key in ("\r", "\n"):
             # Enter: vai direto para o diretorio selecionado na lista (evitando precisar entrar antes)
@@ -373,9 +540,9 @@ class NavigatorState:
                 )
                 if os.path.isdir(candidate):
                     self.target_path = candidate
+                    self.finished = True
                 else:
-                    self.target_path = self.current_path
-                self.finished = True
+                    self.status_message = "Arquivo selecionado. Use F5, F6 ou F8."
             elif not self.search_query:
                 # Se a pasta atual nao tiver subpastas e nao houver filtro sem resultado, mantem na atual
                 self.target_path = self.current_path
@@ -433,6 +600,213 @@ class NavigatorState:
             self.selected_idx = 0
             self.scroll_offset = 0
             self.apply_filter()
+
+
+class FileOperationController:
+    """Small interaction state machine for destination, conflict, and confirmation UI."""
+
+    def __init__(self, navigator, action):
+        self.navigator = navigator
+        self.action = action
+        if not navigator.filtered_dirs or not 0 <= navigator.selected_idx < len(
+            navigator.filtered_dirs
+        ):
+            raise OperationError("Selecione um arquivo ou diretorio primeiro")
+        self.source = os.path.abspath(
+            os.path.join(
+                navigator.current_path,
+                navigator.filtered_dirs[navigator.selected_idx],
+            )
+        )
+        self.source_snapshot = inspect_entry(self.source)
+        self.destination_navigator = None
+        self.target = None
+        self.target_snapshot = None
+        self.conflict_action = None
+        self.phase = "confirm" if action == "delete" else "destination"
+        self.done = False
+        self.cancel_requested = False
+        self.message = ""
+        self.progress_text = ""
+        self._last_progress_redraw = 0.0
+
+        if action not in ("copy", "move", "delete"):
+            raise ValueError(f"Unknown file operation: {action}")
+        if action == "delete":
+            validate_delete_target(
+                self.source,
+                self.source_snapshot,
+                protected_paths=(navigator.current_path,),
+            )
+            self.summary = deletion_summary(self.source)
+        else:
+            self.destination_navigator = NavigatorState(navigator.current_path)
+
+    @property
+    def is_destination_phase(self):
+        return self.phase == "destination"
+
+    def _select_destination(self):
+        destination = self.destination_navigator.current_path
+        if self.source_snapshot["kind"] == "directory":
+            source_real = os.path.normcase(os.path.realpath(self.source))
+            destination_real = os.path.normcase(os.path.realpath(destination))
+            try:
+                if os.path.commonpath((destination_real, source_real)) == source_real:
+                    raise OperationError(
+                        "Nao e possivel copiar ou mover um diretorio para dentro dele mesmo"
+                    )
+            except ValueError:
+                pass
+        name = os.path.basename(self.source.rstrip(os.sep))
+        if not name or name in (".", ".."):
+            raise OperationError("Nao foi possivel determinar um nome seguro para o destino")
+        self.target = os.path.abspath(os.path.join(destination, name))
+        self.destination_snapshot = inspect_entry(destination)
+        if self.destination_snapshot["kind"] != "directory":
+            raise OperationError("O destino selecionado deixou de ser um diretorio")
+        if os.path.lexists(self.target):
+            self.target_snapshot = inspect_entry(self.target)
+            self.phase = "conflict"
+        else:
+            self.phase = "confirm"
+
+    def _rename_target(self):
+        destination = os.path.dirname(self.target)
+        label = "copy" if self.action == "copy" else "moved"
+        self.target = unique_destination_path(
+            destination, os.path.basename(self.target), label
+        )
+        self.target_snapshot = None
+        self.conflict_action = None
+        self.phase = "confirm"
+
+    def handle_key(self, key):
+        if self.done or not key:
+            return
+        if self.phase == "destination":
+            if key in ("ESC", "\x03"):
+                self.done = True
+                self.message = "Operacao cancelada; nenhum arquivo foi alterado."
+            elif key in ("\r", "\n"):
+                try:
+                    self._select_destination()
+                except (OSError, OperationError) as exc:
+                    self.message = str(exc)
+                    self.destination_navigator.status_message = self.message
+            elif key == "\b":
+                if self.destination_navigator.search_query:
+                    self.destination_navigator.handle_key(key)
+            elif key in ("UP", "DOWN", "LEFT", "RIGHT", "TAB", "HOME", "END", "PAGEUP", "PAGEDOWN") or (
+                len(key) == 1 and key.isprintable()
+            ):
+                self.destination_navigator.handle_key(key)
+            return
+
+        if self.phase == "conflict":
+            if key in ("ESC", "\x03"):
+                self.done = True
+                self.message = "Operacao cancelada; o destino foi preservado."
+            elif len(key) == 1 and key.casefold() == "r":
+                self._rename_target()
+            elif (
+                self.phase == "conflict"
+                and self.action == "copy"
+                and len(key) == 1
+                and key.casefold() == "s"
+            ):
+                self.conflict_action = "replace"
+                self.phase = "confirm"
+            return
+
+        if self.phase == "confirm":
+            if key in ("ESC", "\x03"):
+                self.done = True
+                self.message = "Operacao cancelada; nenhum arquivo foi alterado."
+            elif key in ("\r", "\n"):
+                self.phase = "running"
+
+    def execute(self, progress=None, cancel=None):
+        try:
+            if self.action == "delete":
+                self.message = delete_entry(
+                    self.source,
+                    expected_source=self.source_snapshot,
+                    protected_paths=(self.navigator.current_path,),
+                )
+            elif self.action == "copy":
+                self.message = copy_entry(
+                    self.source,
+                    self.target,
+                    replace=self.conflict_action == "replace",
+                    expected_source=self.source_snapshot,
+                    expected_target=self.target_snapshot,
+                    destination_dir=os.path.dirname(self.target),
+                    expected_destination=self.destination_snapshot,
+                    progress=progress,
+                    cancel=cancel,
+                )
+            else:
+                self.message = move_entry(
+                    self.source,
+                    self.target,
+                    expected_source=self.source_snapshot,
+                    destination_dir=os.path.dirname(self.target),
+                    expected_destination=self.destination_snapshot,
+                    progress=progress,
+                    cancel=cancel,
+                )
+        except OperationCancelled:
+            self.message = "Operacao cancelada; o item original foi preservado."
+        except (OSError, OperationError) as exc:
+            self.message = f"Falha na operacao: {exc}"
+        self.done = True
+
+    def screen_lines(self, columns, rows):
+        source_name = os.path.basename(self.source.rstrip(os.sep)) or self.source
+        if self.phase == "destination":
+            return None
+        lines = []
+        if self.action == "delete":
+            lines.extend(
+                (
+                    "Excluir permanentemente o item selecionado?",
+                    sanitize_terminal_text(source_name),
+                )
+            )
+            if self.source_snapshot["kind"] == "directory":
+                lines.append(
+                    f"A exclusao e recursiva: {self.summary['files']} arquivos, "
+                    f"{self.summary['directories']} diretorios e "
+                    f"{self.summary['links']} links/junctions."
+                )
+            lines.append("A operacao e permanente e nao usa lixeira.")
+        elif self.phase == "conflict":
+            lines.extend(
+                (
+                    "Ja existe um item com este nome no destino:",
+                    sanitize_terminal_text(self.target),
+                )
+            )
+            lines.append(
+                "S substituir | R renomear para uma copia numerada | Esc cancelar"
+                if self.action == "copy"
+                else "R escolher um nome numerado | Esc cancelar (nao ha substituicao para mover)"
+            )
+        else:
+            verb = "Copiar" if self.action == "copy" else "Mover"
+            lines.extend(
+                (
+                    f"{verb} este item?",
+                    f"Origem: {sanitize_terminal_text(self.source)}",
+                    f"Destino: {sanitize_terminal_text(self.target)}",
+                )
+            )
+            if self.source_snapshot["kind"] in ("symlink", "junction"):
+                lines.append("O link sera tratado como um item; seu alvo nao sera percorrido.")
+            lines.append("Enter confirmar | Esc cancelar")
+        max_content = max(1, rows - 2)
+        return [truncate_text(line, columns) for line in lines[:max_content]]
 
 
 def get_powershell_integration_block(shortcut="dn"):
@@ -1102,11 +1476,16 @@ def main():
 
     ui_out = sys.stderr
     prev_line_count = 0
+    last_render_signature = None
 
-    def render_lines(lines):
-        nonlocal prev_line_count
+    def render_lines(lines, terminal_rows):
+        nonlocal prev_line_count, last_render_signature
         if not lines:
             lines = ["\033[90m(nenhuma subpasta)\033[0m"]
+        display_lines = layout_ui_lines(lines, terminal_rows)
+        signature = (tuple(display_lines), terminal_rows)
+        if signature == last_render_signature:
+            return
 
         out = []
         if prev_line_count > 1:
@@ -1114,19 +1493,20 @@ def main():
         elif prev_line_count == 1:
             out.append("\r")
 
-        for i, line in enumerate(lines):
-            if i < len(lines) - 1:
+        for i, line in enumerate(display_lines):
+            if i < len(display_lines) - 1:
                 out.append(f"\033[2K{line}\r\n")
             else:
                 out.append(f"\033[2K{line}")
 
-        if prev_line_count > len(lines):
-            diff = prev_line_count - len(lines)
+        if prev_line_count > len(display_lines):
+            diff = prev_line_count - len(display_lines)
             for _ in range(diff):
                 out.append("\r\n\033[2K")
             out.append(f"\033[{diff}A\r")
 
-        prev_line_count = len(lines)
+        prev_line_count = len(display_lines)
+        last_render_signature = signature
         ui_out.write("".join(out))
         ui_out.flush()
 
@@ -1157,8 +1537,93 @@ def main():
         ui_out.flush()
 
     state = NavigatorState(initial_path)
+    active_operation = None
+    help_visible = False
+
+    def render_current(term_size=None):
+        if term_size is None:
+            term_size = shutil.get_terminal_size((80, 24))
+        rows = max(1, term_size.lines)
+        columns = max(1, term_size.columns)
+        if help_visible:
+            lines = build_help_lines(columns, rows)
+        elif active_operation is not None and active_operation.is_destination_phase:
+            destination_state = active_operation.destination_navigator
+            has_filter = bool(destination_state.search_query)
+            item_rows = max(
+                1,
+                min(8, rows - 1 - 1 - 1 - int(has_filter)),
+            )
+            lines, destination_state.selected_idx, destination_state.scroll_offset = build_ui_lines(
+                destination_state.current_path,
+                destination_state.filtered_dirs,
+                destination_state.selected_idx,
+                destination_state.scroll_offset,
+                item_rows,
+                columns,
+                destination_state.search_query,
+                footer_text=build_footer(columns, "destination"),
+                heading=f"Destino para {active_operation.action}: selecione a pasta atual",
+                status_message=destination_state.status_message,
+            )
+        elif active_operation is not None:
+            lines = active_operation.screen_lines(columns, rows) or []
+            if active_operation.progress_text:
+                lines.append(truncate_text(active_operation.progress_text, columns))
+            if active_operation.phase == "conflict" and active_operation.action == "move":
+                footer = fit_footer("R renomear | Esc cancelar", columns, "conflict")
+            else:
+                context = "conflict" if active_operation.phase == "conflict" else "confirmation"
+                footer = build_footer(columns, context)
+            lines.append(footer)
+        else:
+            has_filter = bool(state.search_query)
+            has_status = bool(state.status_message)
+            item_rows = max(
+                1,
+                min(8, rows - 1 - 1 - int(has_filter) - 1 - int(has_status)),
+            )
+            lines, state.selected_idx, state.scroll_offset = build_ui_lines(
+                state.current_path,
+                state.filtered_dirs,
+                state.selected_idx,
+                state.scroll_offset,
+                item_rows,
+                columns,
+                state.search_query,
+                footer_text=build_footer(columns),
+                status_message=state.status_message,
+            )
+        render_lines(lines, rows)
+
+    def check_operation_cancelled():
+        if active_operation is None or active_operation.cancel_requested:
+            return active_operation is not None and active_operation.cancel_requested
+        try:
+            available = msvcrt.kbhit() if IS_WINDOWS else bool(select.select([fd], [], [], 0)[0])
+            if available:
+                key = read_key(fd, timeout=0)
+                if key in ("ESC", "\x03"):
+                    active_operation.cancel_requested = True
+        except (OSError, ValueError, TypeError):
+            pass
+        return active_operation.cancel_requested
+
+    def operation_progress(path, copied, total):
+        if active_operation is None:
+            return
+        active_operation.progress_text = (
+            f"Copiando {sanitize_terminal_text(os.path.basename(path))}: {copied}/{total} bytes"
+        )
+        now = time.monotonic()
+        if copied == total or now - active_operation._last_progress_redraw >= 0.2:
+            active_operation._last_progress_redraw = now
+            render_current()
 
     def sigint_handler(signum, frame):
+        if active_operation is not None:
+            active_operation.cancel_requested = True
+            return
         state.cancelled = True
         state.finished = True
         clear_ui()
@@ -1178,27 +1643,54 @@ def main():
 
         while not state.finished:
             term_size = shutil.get_terminal_size((80, 24))
-            state.max_lines = max(3, min(8, term_size.lines - 4))
-
-            lines, state.selected_idx, state.scroll_offset = build_ui_lines(
-                state.current_path,
-                state.filtered_dirs,
-                state.selected_idx,
-                state.scroll_offset,
-                state.max_lines,
-                term_size.columns,
-                state.search_query,
-            )
-            render_lines(lines)
+            render_current(term_size)
 
             if test_key_queue is not None:
                 key = test_key_queue.pop(0) if test_key_queue else "ESC"
             else:
-                key = read_key(fd)
-            state.handle_key(key)
+                key = read_key(fd, timeout=0.2)
+                if key is None:
+                    continue
+
+            if help_visible:
+                if key in ("F1", "?", "ESC", "\x03"):
+                    help_visible = False
+                continue
+
+            if active_operation is not None:
+                active_operation.handle_key(key)
+                if active_operation.done:
+                    state.status_message = active_operation.message
+                    state.refresh_dirs()
+                    active_operation = None
+                elif active_operation.phase == "running":
+                    active_operation.execute(
+                        progress=operation_progress,
+                        cancel=check_operation_cancelled,
+                    )
+                    if active_operation.done:
+                        state.status_message = active_operation.message
+                        state.refresh_dirs()
+                        active_operation = None
+                continue
+
+            if key in ("F1", "?"):
+                help_visible = True
+            elif key in ("F5", "F6", "F8"):
+                action = {"F5": "copy", "F6": "move", "F8": "delete"}[key]
+                try:
+                    active_operation = FileOperationController(state, action)
+                except (OSError, OperationError) as exc:
+                    state.status_message = str(exc)
+            else:
+                state.handle_key(key)
 
     except KeyboardInterrupt:
-        state.cancelled = True
+        if active_operation is not None:
+            active_operation.cancel_requested = True
+            state.status_message = "Operacao cancelada; finalizando a limpeza segura."
+        else:
+            state.cancelled = True
     finally:
         if not IS_WINDOWS and old_settings is not None:
             with contextlib.suppress(OSError, Exception):

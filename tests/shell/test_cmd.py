@@ -94,6 +94,69 @@ def test_cmd_launcher_selection_cancel_and_error(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires real Windows cmd.exe")
+def test_cmd_launcher_file_copy_keeps_the_calling_session(tmp_path):
+    cmd = shutil.which("cmd.exe")
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    python = shutil.which("python.exe")
+    if not cmd or not powershell or not python:
+        pytest.skip("cmd.exe, PowerShell, or Python 3 is unavailable")
+
+    project_root = Path(__file__).resolve().parents[2]
+    start_dir = tmp_path / "start"
+    start_dir.mkdir()
+    destination = start_dir / "destino & ç"
+    destination.mkdir()
+    source = start_dir / "source & ç.txt"
+    source.write_text("cmd file operation", encoding="utf-8")
+    install_dir = tmp_path / "installed"
+    isolated_temp = tmp_path / "isolated temp"
+    isolated_temp.mkdir()
+    env = os.environ.copy()
+    env.update(
+        DIRNAV_INSTALL_DIR=str(install_dir),
+        DIRNAV_TEST_PROFILE=str(tmp_path / "isolated-profile.ps1"),
+        DIRNAV_SKIP_PATH="1",
+        TEMP=str(isolated_temp),
+        PATH=str(Path(python).parent) + os.pathsep + env.get("PATH", ""),
+        DIRNAV_TEST_KEYS="s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC",
+    )
+    subprocess.run(
+        [powershell, "-NoProfile", "-File", str(project_root / "install.ps1"),
+         "-Shortcut", "dn", "-NonInteractive"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    cwd_record = tmp_path / "observed-cwd.txt"
+    runner = tmp_path / "run-file-operation.cmd"
+    runner.write_text(
+        f'@echo off\r\nchcp 65001 >nul\r\ncd /d "{start_dir}"\r\n'
+        f'call "{install_dir / "dirnav.cmd"}"\r\n'
+        'set "LAUNCHER_EXIT=%ERRORLEVEL%"\r\n'
+        f'cd > "{cwd_record}"\r\n'
+        'exit /b %LAUNCHER_EXIT%\r\n',
+        encoding="utf-8",
+    )
+    profile_root = Path(env["USERPROFILE"])
+    secure_dirs_before = set(profile_root.glob("dirnav-cmd-*"))
+    result = subprocess.run(
+        [cmd, "/d", "/q", "/c", "call", str(runner)],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (destination / source.name).read_text(encoding="utf-8") == "cmd file operation"
+    assert source.read_text(encoding="utf-8") == "cmd file operation"
+    assert Path(cwd_record.read_text(encoding="utf-8").strip()) == start_dir
+    assert set(profile_root.glob("dirnav-cmd-*")) == secure_dirs_before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires real Windows cmd.exe")
 def test_cmd_launcher_changes_drive_with_cd_d(tmp_path):
     cmd = shutil.which("cmd.exe")
     subst = shutil.which("subst.exe")

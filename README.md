@@ -9,10 +9,18 @@ Navegação interativa de diretórios para terminal, escrita em Python. O dirnav
 ## Recursos
 
 - Navegação inline, sem interface de tela cheia.
-- Filtro de diretórios enquanto você digita.
+- Filtro de arquivos e diretórios enquanto você digita.
+- Barra inferior adaptável e ajuda com `?` ou `F1`.
 - Seleção com Enter; navegação entre níveis e cancelamento com Esc.
+- `F5` copia o item selecionado para um destino escolhido, com verificação e confirmação para conflitos.
+- `F6` move o item selecionado; movimentos entre volumes copiam e verificam antes de remover a origem.
+- `F8` solicita confirmação explícita antes de excluir. A exclusão é permanente e recursiva para diretórios.
 - Integração para alterar a localização da sessão em CMD e PowerShell.
 - Código Python que usa a biblioteca padrão, sem dependências externas de runtime para a aplicação.
+
+Na branch de evolução da TUI, `q` continua sendo texto de busca e `Esc` cancela a navegação ou a operação atual. A nova interface e as operações de arquivo **não fazem parte** do ZIP publicado `1.0.1-beta.1`; estão em desenvolvimento e aguardam revisão antes de qualquer nova versão.
+
+Os detalhes de segurança, decisões de compatibilidade e validação desta evolução estão em [docs/development/tui-file-operations.md](docs/development/tui-file-operations.md).
 
 ## Compatibilidade e estado de validação
 

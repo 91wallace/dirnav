@@ -220,6 +220,8 @@ def test_packaging_manifests_integrity():
         pkg = json.load(f)
     assert pkg["name"] == "dirnav"
     assert "dirnav" in pkg["bin"]
+    assert "dirnav_operations.py" in pkg["files"]
+    assert os.path.isfile(os.path.join(root, "dirnav_operations.py"))
     assert os.path.isfile(os.path.join(root, pkg["bin"]["dirnav"]))
     assert os.path.isfile(os.path.join(root, "bin", "postinstall.js"))
     assert os.path.isfile(os.path.join(root, "bin", "preuninstall.js"))

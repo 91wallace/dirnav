@@ -60,6 +60,18 @@ if (Test-Path -LiteralPath $localDirnav) {
     curl.exe -fsSL "$RepoRawUrl/dirnav" -o "$targetScript"
 }
 
+$localOperations = Join-Path $PSScriptRoot "dirnav_operations.py"
+$targetOperations = Join-Path $InstallDir "dirnav_operations.py"
+if (Test-Path -LiteralPath $localOperations -PathType Leaf) {
+    Copy-Item -LiteralPath $localOperations -Destination $targetOperations -Force
+} else {
+    Write-Host "Baixando operações de arquivos de $RepoRawUrl/dirnav_operations.py..." -ForegroundColor Gray
+    curl.exe -fsSL "$RepoRawUrl/dirnav_operations.py" -o "$targetOperations"
+}
+if (-not (Test-Path -LiteralPath $targetOperations -PathType Leaf)) {
+    throw "Módulo de operações não foi instalado: $targetOperations"
+}
+
 # 4. Cria wrappers executaveis 'dirnav.cmd' e 'cc.cmd'.
 # O wrapper sempre usa um arquivo de resultado; se o chamador tambem passar
 # --cwd-file, esse argumento posterior continua prevalecendo no parser Python.

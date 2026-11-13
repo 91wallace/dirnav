@@ -9,10 +9,18 @@ Interactive directory navigation for the terminal, written in Python. dirnav dis
 ## Features
 
 - Inline directory browsing without a full-screen interface.
-- Live filtering as you type.
+- Live filtering of files and directories as you type.
+- Responsive bottom shortcut bar and help with `?` or `F1`.
 - Enter to select, navigation between directory levels, and Esc to cancel.
+- `F5` copies the selected item to a chosen destination, with verification and explicit conflict handling.
+- `F6` moves the selected item; cross-volume moves copy and verify before removing the source.
+- `F8` requires confirmation before deletion. Directory deletion is recursive and permanent.
 - Shell integration for changing the current location in CMD and PowerShell.
 - Python implementation using the standard library, with no external runtime dependencies for the application.
+
+In the TUI evolution branch, `q` remains search text and `Esc` cancels the current navigation or operation. The new interface and file operations are **not included** in the published `1.0.1-beta.1` ZIP; they are under development and require review before any new release.
+
+See [docs/development/tui-file-operations.md](docs/development/tui-file-operations.md) for design decisions, security details, and validation status.
 
 ## Compatibility and validation status
 

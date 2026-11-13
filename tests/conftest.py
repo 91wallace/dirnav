@@ -4,6 +4,8 @@ import os
 
 import pytest
 
+import dirnav_operations
+
 
 @pytest.fixture(scope="session")
 def dirnav_module():
@@ -15,6 +17,11 @@ def dirnav_module():
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod
+
+
+@pytest.fixture(scope="session")
+def dirnav_operations_module():
+    return dirnav_operations
 
 
 @pytest.fixture

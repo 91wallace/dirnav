@@ -63,6 +63,18 @@ try {
     cc
     $CurrentLoc3 = (Get-Location).Path
     Assert-True ($CurrentLoc3 -eq $SubDir1) "Comando 'cc' saiu sem nenhuma alteracao ao pressionar ESC (Atual: $CurrentLoc3)"
+
+    # 2d) Copia um arquivo Unicode para um destino escolhido e mantém a localização da sessão.
+    Set-Location -LiteralPath $AncestorDir
+    $CopyDestination = Join-Path $AncestorDir "destino & ç"
+    $CopySource = Join-Path $AncestorDir "source ç.txt"
+    New-Item -ItemType Directory -Path $CopyDestination | Out-Null
+    [IO.File]::WriteAllText($CopySource, "copy-test", [Text.Encoding]::UTF8)
+    $env:DIRNAV_TEST_KEYS = "s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC"
+    cc
+    $CopiedFile = Join-Path $CopyDestination "source ç.txt"
+    Assert-True ((Get-Location).Path -eq $AncestorDir) "F5 preservou a localização da sessão PowerShell"
+    Assert-True ((Test-Path -LiteralPath $CopiedFile) -and ([IO.File]::ReadAllText($CopiedFile).Trim([char]0xFEFF) -eq "copy-test")) "F5 copiou arquivo Unicode com destino confirmado"
 } finally {
     Remove-Item Env:\DIRNAV_TEST_KEYS -ErrorAction SilentlyContinue
     Set-Location -LiteralPath $OrigLocation.Path
@@ -89,6 +101,7 @@ try {
     # Primeira execucao do install.ps1
     & $InstallPs1 -Shortcut "dn" -NonInteractive | Out-Null
     Assert-True (Test-Path -LiteralPath (Join-Path $MockInstallDir "dirnav.py")) "install.ps1 copiou dirnav.py"
+    Assert-True (Test-Path -LiteralPath (Join-Path $MockInstallDir "dirnav_operations.py")) "install.ps1 copiou modulo de operacoes"
     Assert-True (Test-Path -LiteralPath (Join-Path $MockInstallDir "dirnav.cmd")) "install.ps1 gerou launcher dirnav.cmd"
     Assert-True (Test-Path -LiteralPath (Join-Path $MockInstallDir "cc.cmd")) "install.ps1 gerou launcher nativo cc.cmd"
 

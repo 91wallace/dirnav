@@ -33,9 +33,25 @@ bash "$PROJECT_ROOT/install.sh" --shortcut=dn --non-interactive
 TARGET="$HOME/.local/bin/dirnav"
 [[ -f "$TARGET" ]] || { echo '[FAIL] binário não instalado no HOME isolado'; exit 1; }
 grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$TARGET" || { echo '[FAIL] marcador de propriedade ausente'; exit 1; }
+[[ -f "$HOME/.local/bin/dirnav_operations.py" ]] || { echo '[FAIL] módulo de operações não instalado'; exit 1; }
+grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$HOME/.local/bin/dirnav_operations.py" || { echo '[FAIL] marcador do módulo ausente'; exit 1; }
 [[ "$(grep -Fc '# Dirnav shell integration' "$HOME/.bashrc")" -eq 1 ]] || { echo '[FAIL] bloco de perfil duplicado'; exit 1; }
 grep -Fq "alias keepme='printf keep'" "$HOME/.bashrc" || { echo '[FAIL] linha não relacionada foi alterada'; exit 1; }
 bash -n "$HOME/.bashrc"
+
+FILE_TEST_HOME="$TEST_HOME/file-operations"
+mkdir -p "$FILE_TEST_HOME/destination & unicode-ç"
+printf '%s' 'bash file operation' > "$FILE_TEST_HOME/source & ç.txt"
+(
+    cd "$FILE_TEST_HOME"
+    source "$HOME/.bashrc"
+    export DIRNAV_TEST_KEYS='s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC'
+    dn
+    [[ "$PWD" == "$FILE_TEST_HOME" ]] || { echo '[FAIL] operação de arquivo alterou o CWD da sessão Bash'; exit 1; }
+    [[ "$(cat 'destination & unicode-ç/source & ç.txt')" == 'bash file operation' ]] || { echo '[FAIL] operação F5 Bash não copiou o arquivo'; exit 1; }
+    [[ "$(cat 'source & ç.txt')" == 'bash file operation' ]] || { echo '[FAIL] operação F5 Bash alterou a origem'; exit 1; }
+)
+unset DIRNAV_TEST_KEYS
 
 bash "$PROJECT_ROOT/install.sh" --shortcut=dn --non-interactive
 [[ "$(grep -Fc '# Dirnav shell integration' "$HOME/.bashrc")" -eq 1 ]] || { echo '[FAIL] reinstalação duplicou integração'; exit 1; }
@@ -75,6 +91,7 @@ rm -f "$TARGET"
 mv "$TARGET.real" "$TARGET"
 bash "$PROJECT_ROOT/uninstall.sh"
 [[ ! -e "$TARGET" ]] || { echo '[FAIL] desinstalador não removeu binário marcado'; exit 1; }
+[[ ! -e "$HOME/.local/bin/dirnav_operations.py" ]] || { echo '[FAIL] desinstalador não removeu módulo marcado'; exit 1; }
 ! grep -Fq '# Dirnav shell integration' "$HOME/.bashrc" || { echo '[FAIL] bloco dirnav permaneceu no perfil'; exit 1; }
 grep -Fq '# user-owned line' "$HOME/.bashrc" || { echo '[FAIL] desinstalador removeu linha alheia'; exit 1; }
 grep -Fq "alias keepme='printf keep'" "$HOME/.bashrc" || { echo '[FAIL] desinstalador removeu alias alheio'; exit 1; }
@@ -91,6 +108,7 @@ HOME="$ZSH_HOME" SHELL=/usr/bin/zsh bash "$PROJECT_ROOT/install.sh" --non-intera
 [[ -f "$ZSH_HOME/.zshrc" && ! -e "$ZSH_HOME/.bashrc" ]] || { echo '[FAIL] instalação Zsh sem perfil não criou .zshrc'; exit 1; }
 HOME="$ZSH_HOME" bash "$PROJECT_ROOT/uninstall.sh" >/dev/null
 [[ ! -e "$ZSH_HOME/.local/bin/dirnav" ]] || { echo '[FAIL] instalação isolada Zsh não foi removida'; exit 1; }
+[[ ! -e "$ZSH_HOME/.local/bin/dirnav_operations.py" ]] || { echo '[FAIL] instalação isolada Zsh deixou o módulo'; exit 1; }
 
 if grep -Eq '/usr/local/bin|/etc/profile\.d|sudo ' "$PROJECT_ROOT/install.sh" "$PROJECT_ROOT/uninstall.sh"; then
     echo '[FAIL] script contém operação global inesperada'; exit 1

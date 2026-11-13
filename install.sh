@@ -46,27 +46,40 @@ USER_SHORTCUT="${USER_SHORTCUT:-dn}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/dirnav-source.XXXXXX")"
+SOURCE_OPERATIONS_FILE="$(mktemp "${TMPDIR:-/tmp}/dirnav-operations-source.XXXXXX")"
 STAGED_FILE=""
+STAGED_OPERATIONS_FILE=""
 cleanup() {
     rm -f "$SOURCE_FILE"
+    rm -f "$SOURCE_OPERATIONS_FILE"
     [[ -z "$STAGED_FILE" ]] || rm -f "$STAGED_FILE"
+    [[ -z "$STAGED_OPERATIONS_FILE" ]] || rm -f "$STAGED_OPERATIONS_FILE"
 }
 trap cleanup EXIT HUP INT TERM
 
 if [[ -f "$SCRIPT_DIR/dirnav" ]]; then
     tr -d '\r' < "$SCRIPT_DIR/dirnav" > "$SOURCE_FILE"
+    [[ -f "$SCRIPT_DIR/dirnav_operations.py" ]] || fail "Módulo dirnav_operations.py ausente ao lado do launcher."
+    tr -d '\r' < "$SCRIPT_DIR/dirnav_operations.py" > "$SOURCE_OPERATIONS_FILE"
 else
     curl -fsSL "$REPO_RAW_URL/dirnav" | tr -d '\r' > "$SOURCE_FILE"
+    curl -fsSL "$REPO_RAW_URL/dirnav_operations.py" | tr -d '\r' > "$SOURCE_OPERATIONS_FILE"
 fi
 
 IFS= read -r SHEBANG < "$SOURCE_FILE" || fail "Fonte dirnav vazia."
 [[ "$SHEBANG" == '#!'* ]] || fail "A fonte dirnav não contém shebang válido."
+grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$SOURCE_OPERATIONS_FILE" || fail "O módulo de operações não contém marcador válido."
 [[ ! -L "$HOME/.local" && ! -L "$BIN_DIR" ]] || fail "Destino per-user passa por symlink; instalação cancelada."
 mkdir -p "$BIN_DIR"
 TARGET="$BIN_DIR/dirnav"
+TARGET_OPERATIONS="$BIN_DIR/dirnav_operations.py"
 if [[ -e "$TARGET" || -L "$TARGET" ]]; then
     [[ -f "$TARGET" && ! -L "$TARGET" ]] || fail "Destino existente não é um arquivo regular: $TARGET"
     grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$TARGET" || fail "Destino existente sem marcador dirnav; preservado: $TARGET"
+fi
+if [[ -e "$TARGET_OPERATIONS" || -L "$TARGET_OPERATIONS" ]]; then
+    [[ -f "$TARGET_OPERATIONS" && ! -L "$TARGET_OPERATIONS" ]] || fail "Módulo existente não é um arquivo regular: $TARGET_OPERATIONS"
+    grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$TARGET_OPERATIONS" || fail "Módulo existente sem marcador dirnav; preservado: $TARGET_OPERATIONS"
 fi
 
 STAGED_FILE="$(mktemp "$BIN_DIR/.dirnav-stage.XXXXXX")"
@@ -77,6 +90,15 @@ STAGED_FILE="$(mktemp "$BIN_DIR/.dirnav-stage.XXXXXX")"
 chmod 755 "$STAGED_FILE"
 mv -f "$STAGED_FILE" "$TARGET"
 STAGED_FILE=""
+
+STAGED_OPERATIONS_FILE="$(mktemp "$BIN_DIR/.dirnav-operations-stage.XXXXXX")"
+{
+    printf '%s\n' '# DIRNAV_MANAGED_INSTALL'
+    cat "$SOURCE_OPERATIONS_FILE"
+} > "$STAGED_OPERATIONS_FILE"
+chmod 644 "$STAGED_OPERATIONS_FILE"
+mv -f "$STAGED_OPERATIONS_FILE" "$TARGET_OPERATIONS"
+STAGED_OPERATIONS_FILE=""
 
 INTEGRATION_BLOCK="$(cat <<'EOF'
 # Dirnav shell integration

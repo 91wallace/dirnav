@@ -29,6 +29,7 @@
   },
   "files": [
     "dirnav",
+    "dirnav_operations.py",
     "dirnav.ps1",
     "dirnav.sh",
     "bin/dirnav-cli.js",

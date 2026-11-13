@@ -1,4 +1,11 @@
-# Unreleased — Fase 17
+# Unreleased — estabilização e evolução da TUI
+
+- Adicionado rodapé responsivo, ajuda por `?`/`F1` e decodificação F5/F6/F8 para Windows Console e terminais ANSI.
+- Adicionadas cópia verificada, movimentação com fallback seguro entre volumes e exclusão recursiva confirmada, sem invocar shell.
+- Operações de arquivo adicionadas à instalação Python, PowerShell, Bash e ao manifesto npm; nova versão ainda não publicada. A receita Arch permanece vinculada à origem anterior e precisa ser atualizada junto com o próximo commit/release.
+- Testes de filesystem, operações, navegação, layout e integração dos shells foram ampliados; homologação nativa Linux/macOS e junctions depende dos resultados por ambiente.
+
+## Fase 17 — estabilização multiplataforma
 
 - Restringidos os instaladores POSIX ao usuário atual, com blocos de perfil marcados e remoção limitada a arquivos gerenciados.
 - Preparados testes Bash/Zsh e CI Linux/macOS; homologação real dessas plataformas continua pendente.

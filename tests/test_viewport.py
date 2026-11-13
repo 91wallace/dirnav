@@ -5,7 +5,7 @@ def strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
-def test_viewport_invariant_when_scrolling_down_past_fifth_item(dirnav_module):
+def test_viewport_invariant_when_scrolling_down_past_fifth_item(dirnav_module, tmp_path):
     """
     Testa especificamente o Bug Critico 0:
     Quando o usuario corre os diretorios para baixo (alem do 5o diretorio),
@@ -13,12 +13,14 @@ def test_viewport_invariant_when_scrolling_down_past_fifth_item(dirnav_module):
     O item selecionado NUNCA pode ser substituido ou ocultado pelo indicador inferior.
     """
     items = [f"folder_{i:02d}" for i in range(1, 21)]  # 20 pastas
+    for item in items:
+        (tmp_path / item).mkdir()
     max_lines = 8
     scroll_offset = 0
 
     for selected_idx in range(len(items)):
         lines, new_sel, scroll_offset = dirnav_module.build_ui_lines(
-            current_path="/root/test",
+            current_path=str(tmp_path),
             items=items,
             selected_idx=selected_idx,
             scroll_offset=scroll_offset,
@@ -98,3 +100,74 @@ def test_filesystem_control_characters_are_not_written_as_terminal_escapes(
     assert "\x1b[2J" not in rendered
     assert "\x1b[31m" not in rendered
     assert "�" in rendered
+
+
+def test_footer_stays_on_last_usable_row_without_overlapping_content(dirnav_module, tmp_path):
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "readme.txt").write_text("read me", encoding="utf-8")
+    lines, _, _ = dirnav_module.build_ui_lines(
+        current_path=str(tmp_path),
+        items=["folder", "readme.txt"],
+        selected_idx=0,
+        scroll_offset=0,
+        max_lines=4,
+        term_columns=80,
+        footer_text=dirnav_module.build_footer(80),
+    )
+
+    layout = dirnav_module.layout_ui_lines(lines, terminal_rows=20)
+
+    assert layout[-1].endswith("Esc sair\033[0m")
+    assert len(layout) == 19
+    assert "folder/" in "\n".join(strip_ansi(line) for line in layout)
+    assert "readme.txt" in "\n".join(strip_ansi(line) for line in layout)
+
+
+def test_footer_truncates_in_narrow_terminal_and_updates_by_context(dirnav_module):
+    navigation = dirnav_module.build_footer(14, "navigation")
+    destination = dirnav_module.build_footer(14, "destination")
+    help_footer = dirnav_module.build_footer(8, "help")
+
+    assert len(navigation) <= 14
+    assert len(destination) <= 14
+    assert len(help_footer) <= 8
+    assert navigation != destination
+    assert navigation == "F5 F6 F8 ? Esc"
+
+
+def test_unicode_cell_width_and_truncation_fit_terminal(dirnav_module):
+    text = "中文文件abc"
+    assert dirnav_module.terminal_cell_width("中文") == 4
+    clipped = dirnav_module.truncate_text(text, 6)
+    assert dirnav_module.terminal_cell_width(clipped) <= 6
+
+
+def test_help_screen_lists_file_operations_and_existing_key_semantics(dirnav_module):
+    lines = dirnav_module.build_help_lines(term_columns=120, terminal_rows=20)
+    rendered = "\n".join(lines)
+
+    assert "F5: copiar" in rendered
+    assert "F6: mover" in rendered
+    assert "F8: excluir" in rendered
+    assert "Q nao encerra" in rendered
+    assert "Esc ou Ctrl+C: cancelar" in rendered
+
+
+def test_small_terminal_layout_keeps_footer_and_bounds_rows(dirnav_module):
+    lines = ["header", "one", "two", "footer"]
+    for rows in range(1, 8):
+        layout = dirnav_module.layout_ui_lines(lines, terminal_rows=rows)
+        assert len(layout) <= max(1, rows - 1)
+        assert layout[-1] == "footer"
+
+
+def test_file_listing_preserves_directory_first_order(dirnav_module, tmp_path):
+    (tmp_path / "z-directory").mkdir()
+    (tmp_path / "a-directory").mkdir()
+    (tmp_path / "a-file.txt").write_text("file", encoding="utf-8")
+
+    assert dirnav_module.get_entries(str(tmp_path)) == [
+        "a-directory",
+        "z-directory",
+        "a-file.txt",
+    ]

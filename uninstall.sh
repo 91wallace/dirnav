@@ -10,6 +10,7 @@ fi
 [[ "$(id -u)" != 0 ]] || { printf '[ERRO] Não execute como root/sudo.\n' >&2; exit 1; }
 
 BIN_PATH="${HOME:?HOME is required}/.local/bin/dirnav"
+OPERATIONS_PATH="$HOME/.local/bin/dirnav_operations.py"
 STATUS=0
 if [[ -L "$HOME/.local" || -L "$HOME/.local/bin" ]]; then
     printf '[AVISO] Diretório de instalação contém symlink; binário preservado: %s\n' "$BIN_PATH" >&2
@@ -20,6 +21,19 @@ elif [[ -e "$BIN_PATH" || -L "$BIN_PATH" ]]; then
         printf '[OK] Removido binário dirnav gerenciado: %s\n' "$BIN_PATH"
     else
         printf '[AVISO] Binário sem marcador dirnav preservado: %s\n' "$BIN_PATH" >&2
+        STATUS=1
+    fi
+fi
+
+if [[ -L "$HOME/.local" || -L "$HOME/.local/bin" ]]; then
+    printf '[AVISO] Diretório de instalação contém symlink; módulo preservado: %s\n' "$OPERATIONS_PATH" >&2
+    STATUS=1
+elif [[ -e "$OPERATIONS_PATH" || -L "$OPERATIONS_PATH" ]]; then
+    if [[ -f "$OPERATIONS_PATH" && ! -L "$OPERATIONS_PATH" ]] && grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$OPERATIONS_PATH"; then
+        rm -f "$OPERATIONS_PATH"
+        printf '[OK] Removido módulo dirnav gerenciado: %s\n' "$OPERATIONS_PATH"
+    else
+        printf '[AVISO] Módulo sem marcador dirnav preservado: %s\n' "$OPERATIONS_PATH" >&2
         STATUS=1
     fi
 fi
