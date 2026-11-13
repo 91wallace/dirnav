@@ -10,11 +10,13 @@ Interactive directory navigation for the terminal, written in Python. dirnav dis
 
 - Inline directory browsing without a full-screen interface.
 - Live filtering of files and directories as you type.
-- Responsive bottom shortcut bar and help with `?` or `F1`.
+- Responsive bottom shortcut bar and help with `F1`.
 - Enter to select, navigation between directory levels, and Esc to cancel.
 - `F5` copies the selected item to a chosen destination, with verification and explicit conflict handling.
 - `F6` moves the selected item; cross-volume moves copy and verify before removing the source.
-- `F8` requires confirmation before deletion. Directory deletion is recursive and permanent.
+- The list starts with directories only. `F7` toggles between files and directories only.
+- `F8` includes or hides hidden/system files while file display is active.
+- `Del` asks for confirmation before deletion. Directory deletion is recursive and permanent.
 - Shell integration for changing the current location in CMD and PowerShell.
 - Python implementation using the standard library, with no external runtime dependencies for the application.
 

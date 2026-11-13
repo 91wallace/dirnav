@@ -70,7 +70,7 @@ try {
     $CopySource = Join-Path $AncestorDir "source ç.txt"
     New-Item -ItemType Directory -Path $CopyDestination | Out-Null
     [IO.File]::WriteAllText($CopySource, "copy-test", [Text.Encoding]::UTF8)
-    $env:DIRNAV_TEST_KEYS = "s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC"
+    $env:DIRNAV_TEST_KEYS = "F7,s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC"
     cc
     $CopiedFile = Join-Path $CopyDestination "source ç.txt"
     Assert-True ((Get-Location).Path -eq $AncestorDir) "F5 preservou a localização da sessão PowerShell"

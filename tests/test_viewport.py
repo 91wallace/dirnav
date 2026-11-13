@@ -1,4 +1,8 @@
+import ctypes
+import os
 import re
+
+import pytest
 
 
 def strip_ansi(text):
@@ -117,7 +121,7 @@ def test_footer_stays_on_last_usable_row_without_overlapping_content(dirnav_modu
 
     layout = dirnav_module.layout_ui_lines(lines, terminal_rows=20)
 
-    assert layout[-1].endswith("Esc sair\033[0m")
+    assert layout[-1].endswith("Esc:Voltar\033[0m")
     assert len(layout) == 19
     assert "folder/" in "\n".join(strip_ansi(line) for line in layout)
     assert "readme.txt" in "\n".join(strip_ansi(line) for line in layout)
@@ -125,6 +129,7 @@ def test_footer_stays_on_last_usable_row_without_overlapping_content(dirnav_modu
 
 def test_footer_truncates_in_narrow_terminal_and_updates_by_context(dirnav_module):
     navigation = dirnav_module.build_footer(14, "navigation")
+    compact_navigation = dirnav_module.build_footer(40, "navigation")
     destination = dirnav_module.build_footer(14, "destination")
     help_footer = dirnav_module.build_footer(8, "help")
 
@@ -132,7 +137,24 @@ def test_footer_truncates_in_narrow_terminal_and_updates_by_context(dirnav_modul
     assert len(destination) <= 14
     assert len(help_footer) <= 8
     assert navigation != destination
-    assert navigation == "F5 F6 F8 ? Esc"
+    assert navigation == "Del:Apagar"
+    assert "F7:Exibir arq" in compact_navigation
+    assert "F8:Arq ocultos" in compact_navigation
+    assert "Del:Apagar" in compact_navigation
+    full = dirnav_module.build_footer(120)
+    for legend in (
+        "F5:Cop",
+        "F6:Mov",
+        "F7:Exibir arquivos",
+        "F8:Arquivos Ocultos",
+        "Del:Apagar",
+        "Esc:Voltar",
+    ):
+        assert legend in full
+    file_mode = dirnav_module.build_footer(160, show_files=True)
+    hidden_mode = dirnav_module.build_footer(180, show_files=True, show_hidden_files=True)
+    assert "F7:Somente diretorios" in file_mode
+    assert "F8:Ocultar arquivos do sistema" in hidden_mode
 
 
 def test_unicode_cell_width_and_truncation_fit_terminal(dirnav_module):
@@ -148,8 +170,11 @@ def test_help_screen_lists_file_operations_and_existing_key_semantics(dirnav_mod
 
     assert "F5: copiar" in rendered
     assert "F6: mover" in rendered
-    assert "F8: excluir" in rendered
+    assert "F7: alternar entre arquivos e somente diretorios" in rendered
+    assert "F8: exibir/ocultar arquivos ocultos ou do sistema" in rendered
+    assert "Del: apagar" in rendered
     assert "Q nao encerra" in rendered
+    assert "F1: mostrar/fechar ajuda" in rendered
     assert "Esc ou Ctrl+C: cancelar" in rendered
 
 
@@ -169,5 +194,90 @@ def test_file_listing_preserves_directory_first_order(dirnav_module, tmp_path):
     assert dirnav_module.get_entries(str(tmp_path)) == [
         "a-directory",
         "z-directory",
+    ]
+    assert dirnav_module.get_entries(str(tmp_path), show_files=True) == [
+        "a-directory",
+        "z-directory",
         "a-file.txt",
     ]
+
+
+def test_f8_lists_hidden_files_when_files_are_enabled_but_hides_hidden_directories(
+    dirnav_module, tmp_path
+):
+    (tmp_path / "visible-directory").mkdir()
+    (tmp_path / ".hidden-directory").mkdir()
+    (tmp_path / "visible.txt").write_text("visible", encoding="utf-8")
+    (tmp_path / ".hidden.txt").write_text("hidden", encoding="utf-8")
+
+    assert dirnav_module.get_entries(str(tmp_path)) == ["visible-directory"]
+    assert dirnav_module.get_entries(str(tmp_path), show_files=True) == [
+        "visible-directory",
+        "visible.txt",
+    ]
+    assert dirnav_module.get_entries(
+        str(tmp_path), show_files=True, show_hidden_files=True
+    ) == [
+        "visible-directory",
+        ".hidden.txt",
+        "visible.txt",
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows hidden file attributes")
+def test_f8_reads_windows_hidden_and_system_file_attributes(dirnav_module, tmp_path):
+    hidden_file = tmp_path / "windows-hidden.txt"
+    hidden_file.write_text("hidden", encoding="utf-8")
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetFileAttributesW.argtypes = (ctypes.c_wchar_p,)
+    kernel32.GetFileAttributesW.restype = ctypes.c_uint32
+    kernel32.SetFileAttributesW.argtypes = (ctypes.c_wchar_p, ctypes.c_uint32)
+    kernel32.SetFileAttributesW.restype = ctypes.c_int
+    original_attributes = kernel32.GetFileAttributesW(str(hidden_file))
+    if original_attributes == 0xFFFFFFFF:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        for attribute in (0x2, 0x4):  # HIDDEN and SYSTEM
+            if not kernel32.SetFileAttributesW(
+                str(hidden_file), original_attributes | attribute
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            assert "windows-hidden.txt" not in dirnav_module.get_entries(
+                str(tmp_path), show_files=True
+            )
+            assert "windows-hidden.txt" in dirnav_module.get_entries(
+                str(tmp_path), show_files=True, show_hidden_files=True
+            )
+    finally:
+        if not kernel32.SetFileAttributesW(str(hidden_file), original_attributes):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def test_f7_and_f8_toggle_file_modes_and_preserve_selection(
+    dirnav_module, tmp_path
+):
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "visible.txt").write_text("visible", encoding="utf-8")
+    (tmp_path / ".secret.txt").write_text("secret", encoding="utf-8")
+    state = dirnav_module.NavigatorState(str(tmp_path))
+    state.selected_idx = state.filtered_dirs.index("alpha")
+
+    state.handle_key("F7")
+
+    assert state.show_files
+    assert "visible.txt" in state.filtered_dirs
+    assert ".secret.txt" not in state.filtered_dirs
+    assert state.filtered_dirs[state.selected_idx] == "alpha"
+    assert "Arquivos exibidos" in state.status_message
+
+    state.handle_key("F8")
+
+    assert state.show_hidden_files
+    assert ".secret.txt" in state.filtered_dirs
+    assert state.filtered_dirs[state.selected_idx] == "alpha"
+    assert "ocultos" in state.status_message
+
+    state.handle_key("F7")
+
+    assert not state.show_files
+    assert state.filtered_dirs == ["alpha"]

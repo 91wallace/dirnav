@@ -97,18 +97,32 @@ def get_directories(path):
         return []
 
 
-def get_entries(path):
-    """Return visible files and directories without following links while listing."""
+def _is_hidden_entry(entry):
+    if entry.name.startswith("."):
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+        return bool(attributes & 0x6)  # FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM
+    except OSError:
+        return True
+
+
+def get_entries(path, show_files=False, show_hidden_files=False):
+    """List directories by default; optionally include regular and hidden/system files."""
     try:
         with os.scandir(path) as entries:
             directories = []
             files = []
             for entry in entries:
-                if entry.name.startswith("."):
-                    continue
+                hidden = _is_hidden_entry(entry)
                 if entry.is_dir(follow_symlinks=True):
-                    directories.append(entry.name)
-                elif entry.is_file(follow_symlinks=False) or entry.is_symlink():
+                    if not hidden:
+                        directories.append(entry.name)
+                elif (
+                    entry.is_file(follow_symlinks=False) or entry.is_symlink()
+                ) and show_files and (show_hidden_files or not hidden):
                     files.append(entry.name)
         return sorted(directories, key=str.lower) + sorted(files, key=str.lower)
     except OSError:
@@ -264,35 +278,71 @@ def build_ui_lines(
     return lines, selected_idx, scroll_offset
 
 
-def fit_footer(text, term_columns, context="navigation"):
+def fit_footer(text, term_columns, context="navigation", compact_options=None):
     """Fit a plain-text footer into a narrow terminal without splitting ANSI codes."""
     width = max(1, term_columns)
     if terminal_cell_width(text) <= width:
         return text
-    essentials = {
-        "navigation": "F5 F6 F8 ? Esc",
-        "destination": "↑↓ Enter Esc",
-        "confirmation": "Enter Esc",
-        "conflict": "S/R Esc",
-        "help": "Esc",
-    }.get(context, "↑/↓ navegar | Enter abrir | Esc cancelar")
-    if terminal_cell_width(essentials) <= width:
-        return essentials
-    return truncate_text(essentials, width)
+    compact_options = compact_options or {
+        "navigation": ("F5:Cop F6:Mov F7:Arquivos F8:Ocultos Del:Apagar", "Del:Apagar"),
+        "destination": ("F7:Arquivos F8:Ocultos Enter:Sel Esc:Vol", "Enter:Sel Esc:Vol"),
+        "confirmation": ("Enter:Confirmar Esc:Cancelar", "Enter:Sim Esc:Não", "Esc:Cancelar"),
+        "conflict": ("S:Substituir R:Renomear Esc:Cancelar", "S:Subst R:Nome Esc:Cancelar", "R:Nome Esc:Cancelar"),
+        "help": ("Esc:Voltar",),
+    }.get(context, ("↑/↓:Navegar Enter:Abrir Esc:Cancelar", "Esc:Cancelar"))
+    for option in compact_options:
+        if terminal_cell_width(option) <= width:
+            return option
+    return truncate_text(compact_options[-1], width)
 
 
-def build_footer(term_columns, context="navigation"):
+def build_footer(
+    term_columns,
+    context="navigation",
+    show_files=False,
+    show_hidden_files=False,
+):
+    files_toggle = "Somente diretorios" if show_files else "Exibir arquivos"
+    hidden_toggle = "Ocultar arquivos do sistema" if show_hidden_files else "Arquivos Ocultos"
+    compact_files_toggle = "Som dirs" if show_files else "Exibir arq"
+    compact_hidden_toggle = "Ocultar sist" if show_hidden_files else "Arq ocultos"
     if context == "destination":
-        text = "↑/↓ navegar | → abrir | Enter usar destino | Esc voltar"
+        text = (
+            f"↑/↓: Navegar | F7:{files_toggle} | F8:{hidden_toggle} | "
+            "→: Abrir | Enter: Selecionar destino | Esc: Voltar"
+        )
+        compact_options = (
+            f"F7:{files_toggle} F8:{hidden_toggle} Enter:Sel Esc:Voltar",
+            f"F7:{files_toggle} F8:{hidden_toggle}",
+            "Enter:Sel Esc:Vol",
+            "Esc:Voltar",
+        )
     elif context == "confirmation":
-        text = "Enter confirmar | Esc cancelar"
+        text = "Enter: Confirmar | Esc: Cancelar"
+        compact_options = None
     elif context == "conflict":
-        text = "S substituir | R renomear | Esc cancelar"
+        text = "S: Substituir | R: Renomear | Esc: Cancelar"
+        compact_options = None
     elif context == "help":
-        text = "Esc ou F1 voltar"
+        text = "Esc/F1: Voltar"
+        compact_options = None
     else:
-        text = "↑↓ mover | Enter abrir | F5 copiar | F6 mover | F8 excluir | ? ajuda | Esc sair"
-    return fit_footer(text, term_columns, context)
+        text = (
+            "↑/↓: Navegar | Enter: Selecionar | F5: Copiar | F6: Mover | "
+            f"F7:{files_toggle} | F8:{hidden_toggle} | Del:Apagar | Esc: Voltar"
+        )
+        compact_options = (
+            f"Enter:Sel F5:Cop F6:Mov F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
+            f"F5:Cop F6:Mov F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
+            f"Enter:Sel F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
+            f"F7:{files_toggle} F8:{hidden_toggle} Del:Apagar",
+            f"F7:{compact_files_toggle} F8:{compact_hidden_toggle} Del:Apagar",
+            f"F7:{files_toggle} F8:{hidden_toggle}",
+            f"F7:{compact_files_toggle} F8:{compact_hidden_toggle}",
+            "Enter:Sel Esc:Vol",
+            "Del:Apagar",
+        )
+    return fit_footer(text, term_columns, context, compact_options)
 
 
 def build_help_lines(term_columns, terminal_rows):
@@ -302,8 +352,10 @@ def build_help_lines(term_columns, terminal_rows):
         "Enter: escolher diretorio selecionado | Backspace: filtrar ou confirmar diretorio atual",
         "F5: copiar item selecionado para um diretorio escolhido",
         "F6: mover item selecionado para um diretorio escolhido",
-        "F8: excluir item selecionado apos confirmacao permanente",
-        "F1 ou ?: mostrar/fechar ajuda | Esc ou Ctrl+C: cancelar",
+        "F7: alternar entre arquivos e somente diretorios",
+        "F8: exibir/ocultar arquivos ocultos ou do sistema",
+        "Del: apagar item selecionado apos confirmacao permanente",
+        "F1: mostrar/fechar ajuda | Esc ou Ctrl+C: cancelar",
         "As letras, inclusive Q, continuam sendo texto de busca; Q nao encerra a sessao.",
         "Na escolha do destino: Direita entra e Enter seleciona o diretorio atual.",
     ]
@@ -342,6 +394,7 @@ def read_key(fd, timeout=None):
                 59: "F1",
                 63: "F5",
                 64: "F6",
+                65: "F7",
                 66: "F8",
                 133: "F11",
                 134: "F12",
@@ -426,6 +479,8 @@ def read_key(fd, timeout=None):
                     return "F5"
                 elif seq == b"\x1b[17~":
                     return "F6"
+                elif seq == b"\x1b[18~":
+                    return "F7"
                 elif seq == b"\x1b[19~":
                     return "F8"
                 return ""
@@ -468,13 +523,46 @@ class NavigatorState:
         self.finished = False
         self.target_path = None
         self.status_message = ""
+        self.show_files = False
+        self.show_hidden_files = False
         self.all_dirs = []
         self.filtered_dirs = []
         self.refresh_dirs()
 
     def refresh_dirs(self):
-        self.all_dirs = get_entries(self.current_path)
+        self.all_dirs = get_entries(
+            self.current_path, self.show_files, self.show_hidden_files
+        )
         self.apply_filter()
+
+    def _refresh_preserving_selection(self):
+        selected = (
+            self.filtered_dirs[self.selected_idx]
+            if self.filtered_dirs and 0 <= self.selected_idx < len(self.filtered_dirs)
+            else None
+        )
+        self.refresh_dirs()
+        if selected in self.filtered_dirs:
+            self.selected_idx = self.filtered_dirs.index(selected)
+            self.apply_filter()
+
+    def toggle_files(self):
+        self.show_files = not self.show_files
+        self._refresh_preserving_selection()
+        self.status_message = (
+            "Arquivos exibidos."
+            if self.show_files
+            else "Somente diretorios exibidos."
+        )
+
+    def toggle_hidden_files(self):
+        self.show_hidden_files = not self.show_hidden_files
+        self._refresh_preserving_selection()
+        self.status_message = (
+            "Arquivos ocultos e do sistema serao exibidos com os arquivos."
+            if self.show_hidden_files
+            else "Arquivos ocultos e do sistema serao ocultados."
+        )
 
     def apply_filter(self):
         self.filtered_dirs = filter_directories(self.all_dirs, self.search_query)
@@ -496,6 +584,13 @@ class NavigatorState:
         if not key:
             return
         self.status_message = ""
+
+        if key == "F7":
+            self.toggle_files()
+            return
+        if key == "F8":
+            self.toggle_hidden_files()
+            return
 
         if key == "UP":
             if self.selected_idx > 0:
@@ -530,7 +625,7 @@ class NavigatorState:
                     self.scroll_offset = 0
                     self.refresh_dirs()
                 else:
-                    self.status_message = "Arquivo selecionado. Use F5, F6 ou F8."
+                    self.status_message = "Arquivo selecionado. Use F5, F6 ou Del."
 
         elif key in ("\r", "\n"):
             # Enter: vai direto para o diretorio selecionado na lista (evitando precisar entrar antes)
@@ -542,7 +637,7 @@ class NavigatorState:
                     self.target_path = candidate
                     self.finished = True
                 else:
-                    self.status_message = "Arquivo selecionado. Use F5, F6 ou F8."
+                    self.status_message = "Arquivo selecionado. Use F5, F6 ou Del."
             elif not self.search_query:
                 # Se a pasta atual nao tiver subpastas e nao houver filtro sem resultado, mantem na atual
                 self.target_path = self.current_path
@@ -559,13 +654,6 @@ class NavigatorState:
             else:
                 self.target_path = self.current_path
                 self.finished = True
-
-        elif key == "DELETE":
-            if self.search_query:
-                self.search_query = self.search_query[:-1]
-                self.selected_idx = 0
-                self.scroll_offset = 0
-                self.apply_filter()
 
         elif key == "HOME":
             self.selected_idx = 0
@@ -697,7 +785,7 @@ class FileOperationController:
             elif key == "\b":
                 if self.destination_navigator.search_query:
                     self.destination_navigator.handle_key(key)
-            elif key in ("UP", "DOWN", "LEFT", "RIGHT", "TAB", "HOME", "END", "PAGEUP", "PAGEDOWN") or (
+            elif key in ("UP", "DOWN", "LEFT", "RIGHT", "TAB", "HOME", "END", "PAGEUP", "PAGEDOWN", "F7", "F8") or (
                 len(key) == 1 and key.isprintable()
             ):
                 self.destination_navigator.handle_key(key)
@@ -1562,7 +1650,12 @@ def main():
                 item_rows,
                 columns,
                 destination_state.search_query,
-                footer_text=build_footer(columns, "destination"),
+                footer_text=build_footer(
+                    columns,
+                    "destination",
+                    destination_state.show_files,
+                    destination_state.show_hidden_files,
+                ),
                 heading=f"Destino para {active_operation.action}: selecione a pasta atual",
                 status_message=destination_state.status_message,
             )
@@ -1591,7 +1684,11 @@ def main():
                 item_rows,
                 columns,
                 state.search_query,
-                footer_text=build_footer(columns),
+                footer_text=build_footer(
+                    columns,
+                    show_files=state.show_files,
+                    show_hidden_files=state.show_hidden_files,
+                ),
                 status_message=state.status_message,
             )
         render_lines(lines, rows)
@@ -1653,7 +1750,7 @@ def main():
                     continue
 
             if help_visible:
-                if key in ("F1", "?", "ESC", "\x03"):
+                if key in ("F1", "ESC", "\x03"):
                     help_visible = False
                 continue
 
@@ -1674,10 +1771,10 @@ def main():
                         active_operation = None
                 continue
 
-            if key in ("F1", "?"):
+            if key == "F1":
                 help_visible = True
-            elif key in ("F5", "F6", "F8"):
-                action = {"F5": "copy", "F6": "move", "F8": "delete"}[key]
+            elif key in ("F5", "F6", "DELETE"):
+                action = {"F5": "copy", "F6": "move", "DELETE": "delete"}[key]
                 try:
                     active_operation = FileOperationController(state, action)
                 except (OSError, OperationError) as exc:

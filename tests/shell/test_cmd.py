@@ -118,7 +118,7 @@ def test_cmd_launcher_file_copy_keeps_the_calling_session(tmp_path):
         DIRNAV_SKIP_PATH="1",
         TEMP=str(isolated_temp),
         PATH=str(Path(python).parent) + os.pathsep + env.get("PATH", ""),
-        DIRNAV_TEST_KEYS="s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC",
+        DIRNAV_TEST_KEYS="F7,s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC",
     )
     subprocess.run(
         [powershell, "-NoProfile", "-File", str(project_root / "install.ps1"),

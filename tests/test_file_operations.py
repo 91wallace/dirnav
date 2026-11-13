@@ -463,6 +463,7 @@ def test_delete_confirmation_can_be_cancelled_without_changes(
     item = tmp_path / "payload.txt"
     item.write_text("keep", encoding="utf-8")
     state = dirnav_module.NavigatorState(str(tmp_path))
+    state.handle_key("F7")
     state.selected_idx = state.filtered_dirs.index("payload.txt")
     operation = dirnav_module.FileOperationController(state, "delete")
     assert "permanente" in " ".join(operation.screen_lines(80, 24)).lower()
@@ -480,6 +481,7 @@ def test_copy_interaction_requires_destination_then_confirmation(
     source.write_text("copy", encoding="utf-8")
     (tmp_path / "destination").mkdir()
     state = dirnav_module.NavigatorState(str(tmp_path))
+    state.handle_key("F7")
     state.selected_idx = state.filtered_dirs.index(source.name)
     operation = dirnav_module.FileOperationController(state, "copy")
 
@@ -492,3 +494,22 @@ def test_copy_interaction_requires_destination_then_confirmation(
     assert operation.done
     assert source.read_text() == "copy"
     assert not list(tmp_path.glob("payload (copy*"))
+
+
+def test_f7_hidden_file_toggle_is_available_in_destination_picker(
+    dirnav_module, tmp_path
+):
+    source = tmp_path / "source.txt"
+    source.write_text("copy", encoding="utf-8")
+    (tmp_path / ".hidden-target").write_text("hidden", encoding="utf-8")
+    state = dirnav_module.NavigatorState(str(tmp_path))
+    state.handle_key("F7")
+    state.selected_idx = state.filtered_dirs.index(source.name)
+    operation = dirnav_module.FileOperationController(state, "copy")
+
+    operation.handle_key("F7")
+    operation.handle_key("F8")
+
+    assert operation.destination_navigator.show_files
+    assert operation.destination_navigator.show_hidden_files
+    assert ".hidden-target" in operation.destination_navigator.filtered_dirs

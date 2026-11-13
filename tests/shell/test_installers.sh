@@ -45,7 +45,7 @@ printf '%s' 'bash file operation' > "$FILE_TEST_HOME/source & ç.txt"
 (
     cd "$FILE_TEST_HOME"
     source "$HOME/.bashrc"
-    export DIRNAV_TEST_KEYS='s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC'
+    export DIRNAV_TEST_KEYS='F7,s,o,u,r,c,e,F5,RIGHT,ENTER,ENTER,ESC'
     dn
     [[ "$PWD" == "$FILE_TEST_HOME" ]] || { echo '[FAIL] operação de arquivo alterou o CWD da sessão Bash'; exit 1; }
     [[ "$(cat 'destination & unicode-ç/source & ç.txt')" == 'bash file operation' ]] || { echo '[FAIL] operação F5 Bash não copiou o arquivo'; exit 1; }

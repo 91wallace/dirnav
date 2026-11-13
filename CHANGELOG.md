@@ -1,6 +1,8 @@
 # Unreleased — estabilização e evolução da TUI
 
-- Adicionado rodapé responsivo, ajuda por `?`/`F1` e decodificação F5/F6/F8 para Windows Console e terminais ANSI.
+- Adicionado rodapé responsivo, ajuda por `F1` e decodificação F5/F6/F7/F8 para Windows Console e terminais ANSI.
+- A lista inicia somente com diretórios; `F7` alterna a exibição de arquivos e `F8` controla arquivos ocultos/do sistema.
+- A exclusão confirmada agora usa `Del`, mantendo `F8` reservado à visibilidade de arquivos ocultos/do sistema.
 - Adicionadas cópia verificada, movimentação com fallback seguro entre volumes e exclusão recursiva confirmada, sem invocar shell.
 - Operações de arquivo adicionadas à instalação Python, PowerShell, Bash e ao manifesto npm; nova versão ainda não publicada. A receita Arch permanece vinculada à origem anterior e precisa ser atualizada junto com o próximo commit/release.
 - Testes de filesystem, operações, navegação, layout e integração dos shells foram ampliados; homologação nativa Linux/macOS e junctions depende dos resultados por ambiente.

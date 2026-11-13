@@ -10,11 +10,13 @@ Navegação interativa de diretórios para terminal, escrita em Python. O dirnav
 
 - Navegação inline, sem interface de tela cheia.
 - Filtro de arquivos e diretórios enquanto você digita.
-- Barra inferior adaptável e ajuda com `?` ou `F1`.
+- Barra inferior adaptável e ajuda com `F1`.
 - Seleção com Enter; navegação entre níveis e cancelamento com Esc.
 - `F5` copia o item selecionado para um destino escolhido, com verificação e confirmação para conflitos.
 - `F6` move o item selecionado; movimentos entre volumes copiam e verificam antes de remover a origem.
-- `F8` solicita confirmação explícita antes de excluir. A exclusão é permanente e recursiva para diretórios.
+- A lista começa mostrando somente diretórios. `F7` alterna entre arquivos e somente diretórios.
+- `F8` inclui ou oculta arquivos ocultos/do sistema quando a exibição de arquivos está ativa.
+- `Del` solicita confirmação antes de apagar; a exclusão é permanente e recursiva para diretórios.
 - Integração para alterar a localização da sessão em CMD e PowerShell.
 - Código Python que usa a biblioteca padrão, sem dependências externas de runtime para a aplicação.
 
