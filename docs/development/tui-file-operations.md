@@ -4,14 +4,14 @@
 
 - Work started on 2026-11-12 in `C:\Users\criarte\projects\dirnav-ui-evolution`, branch `feature/tui-file-operations`, based on `stabilization/multiplatform-f17` at `2006802ddda2b198c6f806613a3820909f517e65`.
 - The originally supplied `C:\Users\criarte\projects\dirnav` directory had Git objects but no usable `HEAD`, config, or working files. It was preserved without changes; work is isolated in the sibling checkout.
-- The published tag `v1.0.1-beta.1` and ZIP were not changed or rebuilt. The feature branch was pushed at `c524a6d`; the F7/F8/Del refinements in this checkpoint remain local and uncommitted.
+- The published tag `v1.0.1-beta.1` and ZIP were not changed or rebuilt. The feature branch was pushed at `c524a6d`; the F7/Del refinements and subsequent TUI adjustments remain local and uncommitted.
 - Python baseline before implementation: 46 passed, 1 skipped (Windows long-path creation failed with WinError 206).
 
 ## Implementation
 
 - `dirnav` defaults to directories only and optionally lists regular files. It keeps existing Enter/Esc/Ctrl+C behavior, and keeps `q` and `?` as search text. F1 opens help.
-- A bottom shortcut bar is reserved on each screen, adapted to narrow terminals, and redrawn through the existing render loop. Text clipping counts wide Unicode cells. Windows Console function keys and ANSI terminal sequences are decoded.
-- The listing defaults to directories only. F7 toggles files on/off; F8 toggles dotfiles and Windows hidden/system-attribute files when file display is active. Hidden directories remain excluded, and the selected visible item is preserved when possible.
+- The TUI reserves no persistent shortcut rows; the tree and status can use the full viewport. Text clipping counts wide Unicode cells. Windows Console function keys and ANSI terminal sequences are decoded.
+- The listing defaults to directories only. F7 toggles files on/off. Starting with `--all` or `-a` includes hidden/system files; there is no F8 shortcut. Hidden directories remain excluded, and the selected visible item is preserved when possible.
 - F5 copies to a user-selected destination. The UI shows source/destination, requires confirmation, offers explicit replacement or a numbered name on conflict, and keeps the original. Copies stage in the destination, hash-verify content, and are removed from staging on ordinary errors/cancellation.
 - F6 moves without intentional overwrite. Same-volume moves use the filesystem rename operation. On EXDEV/Windows cross-device errors it copies, verifies, then removes the source. If source removal fails, both recoverable copies remain and the error identifies them.
 - Same-volume move uses no-replace semantics: Windows `os.rename`, Linux `renameat2(RENAME_NOREPLACE)`, Darwin `renamex_np(RENAME_EXCL)`, or exclusive hard-link/unlink fallback for non-directories. Directory moves fail closed if the OS has no native no-replace primitive.
@@ -24,17 +24,23 @@
 | Check | Result | Evidence |
 |---|---|---|
 | Python compile and Ruff | PASS | `py -3 -m compileall -q dirnav dirnav_operations.py tests`; `py -3 -m ruff check dirnav dirnav_operations.py tests/` reported “All checks passed”. |
-| Focused operations, UI, and viewport tests | PASS | 57 passed, 1 skipped after the F7/F8/Del mode changes. |
-| Windows PowerShell 5.1 integration suite | PASS | `tests/shell/Dirnav.Tests.ps1`: 19 passed, 0 failed, including F5 Unicode/ampersand copy and session location preservation. |
+| Focused operations, UI, and viewport tests | PASS | Current no-bar run: 65 passed, 1 skipped. Includes tree hierarchy/connectors/icons, no shortcut bars on navigation or destination screens, CLI shortcut help, safe Enter-on-file behavior, and file operations. |
+| Windows PowerShell 5.1 integration suite | PASS | `tests/shell/Dirnav.Tests.ps1`: 19 passed, 0 failed, including F5 Unicode/ampersand copy and session location preservation; installer no longer installs feature-only modules or Rich. |
 | PowerShell 7 integration suite | PASS | Same script: 19 passed, 0 failed. |
 | Git Bash on Windows installer and Bash tests | PASS | `test_installers.sh` verified isolated install/remove and F5 copy to a path containing `&`/Unicode; `test_bash.sh` verified shell navigation, cancellation/status propagation. This is Git Bash/MSYS on Windows, not native Linux. |
 | Real Windows CMD integration | PASS | Full `py -3 -m pytest -q -rs` run included the actual `cmd.exe` F5 copy case with a path containing `&` and Unicode; the test passed and verified source preservation and the calling session. |
-| Full Python suite | PASS | `py -3 -m pytest -q -rs`: 92 passed, 2 skipped, 0 failed, 64.01s. |
+| Full Python suite | PASS | `py -3 -m pytest -q`: 96 passed, 2 skipped, 0 failed, 68.02s. |
 | Junction deletion | BLOCKED on host | The Windows test attempted disposable junction creation but the host could not create one; it skipped rather than claiming coverage. |
 | Windows long paths | BLOCKED on host | Existing test skipped because creating the path failed with WinError 206. |
 | Linux/macOS/Zsh/Arch | NOT TESTED / BLOCKED | No native Linux/macOS, Zsh, or Arch/makepkg environment is available. Git Bash is not substituted for these platforms. The Arch source pin predates this unreleased module, so the package needs a release source revision containing the module before it can be built. |
-| npm package dry-run | NOT TESTED | npm CLI is unavailable on this host. The Python manifest test confirms `dirnav_operations.py` is listed in `package.json`; no package archive was generated. |
+| npm package dry-run | NOT TESTED | No package archive was generated in this cleanup run. `package.json` includes only the application, operations module, shell wrappers, CLI and documentation; Rich and feature-only modules are absent. |
 | Cross-volume move | Unit simulation PASS; real volume NOT TESTED | EXDEV is simulated to test copy/verify/remove and preservation on cleanup failure. No second volume was available for native integration. |
+
+## Current interface scope
+
+- The integrated command mode/history, new-item forms, snippet manager, file viewer, Markdown renderer, text editor, and collapsible F12 menu have been removed from the active implementation.
+- The enhanced directory tree, existing directory navigation, F1 help, F5/F6/Del operations, and F7 visibility toggle remain. Persistent shortcut bars are removed from the TUI; `--help` and `-h` list the available controls.
+- Rich is no longer a runtime dependency. Existing user configuration data is not accessed or deleted by this cleanup.
 
 ## Known constraints and residual risks
 

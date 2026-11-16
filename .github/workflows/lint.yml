@@ -68,8 +68,8 @@ jobs:
 
       - name: Run Ruff Check on dirnav and tests
         run: |
-          ruff check dirnav tests/
-          ruff format --check dirnav tests/
+          ruff check dirnav dirnav_operations.py tests/
+          ruff format --check dirnav dirnav_operations.py tests/
 
   powershell-syntax:
     name: PowerShell AST Syntax Validation

@@ -496,19 +496,15 @@ def test_copy_interaction_requires_destination_then_confirmation(
     assert not list(tmp_path.glob("payload (copy*"))
 
 
-def test_f7_hidden_file_toggle_is_available_in_destination_picker(
+def test_all_argument_exposes_hidden_files_in_destination_picker(
     dirnav_module, tmp_path
 ):
     source = tmp_path / "source.txt"
     source.write_text("copy", encoding="utf-8")
     (tmp_path / ".hidden-target").write_text("hidden", encoding="utf-8")
-    state = dirnav_module.NavigatorState(str(tmp_path))
-    state.handle_key("F7")
+    state = dirnav_module.NavigatorState(str(tmp_path), show_all=True)
     state.selected_idx = state.filtered_dirs.index(source.name)
     operation = dirnav_module.FileOperationController(state, "copy")
-
-    operation.handle_key("F7")
-    operation.handle_key("F8")
 
     assert operation.destination_navigator.show_files
     assert operation.destination_navigator.show_hidden_files

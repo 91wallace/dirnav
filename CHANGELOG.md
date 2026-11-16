@@ -1,11 +1,12 @@
 # Unreleased — estabilização e evolução da TUI
 
-- Adicionado rodapé responsivo, ajuda por `F1` e decodificação F5/F6/F7/F8 para Windows Console e terminais ANSI.
-- A lista inicia somente com diretórios; `F7` alterna a exibição de arquivos e `F8` controla arquivos ocultos/do sistema.
-- A exclusão confirmada agora usa `Del`, mantendo `F8` reservado à visibilidade de arquivos ocultos/do sistema.
+- Removido o atalho F8; arquivos ocultos/do sistema passam a ser incluídos somente com `--all` ou `-a`.
+- Redimensionamento da TUI consulta as dimensões atuais do TTY para evitar layout duplicado após mudanças de viewport.
 - Adicionadas cópia verificada, movimentação com fallback seguro entre volumes e exclusão recursiva confirmada, sem invocar shell.
 - Operações de arquivo adicionadas à instalação Python, PowerShell, Bash e ao manifesto npm; nova versão ainda não publicada. A receita Arch permanece vinculada à origem anterior e precisa ser atualizada junto com o próximo commit/release.
 - Testes de filesystem, operações, navegação, layout e integração dos shells foram ampliados; homologação nativa Linux/macOS e junctions depende dos resultados por ambiente.
+- A evolução integrada de comandos, criação, snippets, visualizador Markdown e editor foi removida; a árvore aprimorada e navegação/arquivos foram mantidos.
+- As barras persistentes de atalhos foram removidas da TUI; `--help` e `-h` listam os controles disponíveis.
 
 ## Fase 17 — estabilização multiplataforma
 

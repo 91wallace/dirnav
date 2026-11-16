@@ -10,17 +10,25 @@ Interactive directory navigation for the terminal, written in Python. dirnav dis
 
 - Inline directory browsing without a full-screen interface.
 - Live filtering of files and directories as you type.
-- Responsive bottom shortcut bar and help with `F1`.
+- Directory tree with open/closed folder icons and indentation up to three levels.
+- Available shortcuts are listed with `dirnav --help` or `dirnav -h`; the interface has no persistent shortcut bars.
 - Enter to select, navigation between directory levels, and Esc to cancel.
 - `F5` copies the selected item to a chosen destination, with verification and explicit conflict handling.
 - `F6` moves the selected item; cross-volume moves copy and verify before removing the source.
 - The list starts with directories only. `F7` toggles between files and directories only.
-- `F8` includes or hides hidden/system files while file display is active.
+- `--all` or `-a` starts with regular, hidden, and system files visible; `F7` toggles between files and directories only.
 - `Del` asks for confirmation before deletion. Directory deletion is recursive and permanent.
+- `Enter` selects a directory for shell integration; `Tab` or `→` enters it.
 - Shell integration for changing the current location in CMD and PowerShell.
 - Python implementation using the standard library, with no external runtime dependencies for the application.
 
-In the TUI evolution branch, `q` remains search text and `Esc` cancels the current navigation or operation. The new interface and file operations are **not included** in the published `1.0.1-beta.1` ZIP; they are under development and require review before any new release.
+```powershell
+py -3 .\dirnav --help
+py -3 .\dirnav --all
+py -3 .\dirnav -a C:\path\to\folder
+```
+
+`q` remains search text and `Esc` cancels the current navigation or operation. The directory tree and file operations are under development and **not included** in the published `1.0.1-beta.1` ZIP.
 
 See [docs/development/tui-file-operations.md](docs/development/tui-file-operations.md) for design decisions, security details, and validation status.
 

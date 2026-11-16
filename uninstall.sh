@@ -11,6 +11,7 @@ fi
 
 BIN_PATH="${HOME:?HOME is required}/.local/bin/dirnav"
 OPERATIONS_PATH="$HOME/.local/bin/dirnav_operations.py"
+RUNTIME_MODULES=(dirnav_storage.py dirnav_editor.py dirnav_features.py dirnav_modes.py)
 STATUS=0
 if [[ -L "$HOME/.local" || -L "$HOME/.local/bin" ]]; then
     printf '[AVISO] Diretório de instalação contém symlink; binário preservado: %s\n' "$BIN_PATH" >&2
@@ -24,6 +25,22 @@ elif [[ -e "$BIN_PATH" || -L "$BIN_PATH" ]]; then
         STATUS=1
     fi
 fi
+
+for MODULE_NAME in "${RUNTIME_MODULES[@]}"; do
+    MODULE_PATH="$HOME/.local/bin/$MODULE_NAME"
+    if [[ -L "$HOME/.local" || -L "$HOME/.local/bin" ]]; then
+        printf '[AVISO] Diretório contém symlink; módulo preservado: %s\n' "$MODULE_PATH" >&2
+        STATUS=1
+    elif [[ -e "$MODULE_PATH" || -L "$MODULE_PATH" ]]; then
+        if [[ -f "$MODULE_PATH" && ! -L "$MODULE_PATH" ]] && grep -Fxq '# DIRNAV_MANAGED_INSTALL' "$MODULE_PATH"; then
+            rm -f "$MODULE_PATH"
+            printf '[OK] Removido módulo dirnav gerenciado: %s\n' "$MODULE_PATH"
+        else
+            printf '[AVISO] Módulo sem marcador dirnav preservado: %s\n' "$MODULE_PATH" >&2
+            STATUS=1
+        fi
+    fi
+done
 
 if [[ -L "$HOME/.local" || -L "$HOME/.local/bin" ]]; then
     printf '[AVISO] Diretório de instalação contém symlink; módulo preservado: %s\n' "$OPERATIONS_PATH" >&2

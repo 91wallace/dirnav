@@ -10,17 +10,25 @@ Navegação interativa de diretórios para terminal, escrita em Python. O dirnav
 
 - Navegação inline, sem interface de tela cheia.
 - Filtro de arquivos e diretórios enquanto você digita.
-- Barra inferior adaptável e ajuda com `F1`.
+- Árvore de diretórios com ícones de pasta aberta/fechada e recuo de até três níveis.
+- Os atalhos disponíveis são listados por `dirnav --help` ou `dirnav -h`; a interface não exibe barras persistentes.
 - Seleção com Enter; navegação entre níveis e cancelamento com Esc.
 - `F5` copia o item selecionado para um destino escolhido, com verificação e confirmação para conflitos.
 - `F6` move o item selecionado; movimentos entre volumes copiam e verificam antes de remover a origem.
 - A lista começa mostrando somente diretórios. `F7` alterna entre arquivos e somente diretórios.
-- `F8` inclui ou oculta arquivos ocultos/do sistema quando a exibição de arquivos está ativa.
+- `--all` ou `-a` inicia com arquivos comuns, ocultos e do sistema visíveis; `F7` alterna entre arquivos e somente diretórios.
 - `Del` solicita confirmação antes de apagar; a exclusão é permanente e recursiva para diretórios.
+- `Enter` seleciona o diretório para a integração com o shell; `Tab` ou `→` entra nele.
 - Integração para alterar a localização da sessão em CMD e PowerShell.
 - Código Python que usa a biblioteca padrão, sem dependências externas de runtime para a aplicação.
 
-Na branch de evolução da TUI, `q` continua sendo texto de busca e `Esc` cancela a navegação ou a operação atual. A nova interface e as operações de arquivo **não fazem parte** do ZIP publicado `1.0.1-beta.1`; estão em desenvolvimento e aguardam revisão antes de qualquer nova versão.
+```powershell
+py -3 .\dirnav --help
+py -3 .\dirnav --all
+py -3 .\dirnav -a C:\caminho\para\pasta
+```
+
+`q` continua sendo texto de busca e `Esc` cancela a navegação ou a operação atual. A árvore e as operações de arquivo estão em desenvolvimento e **não fazem parte** do ZIP publicado `1.0.1-beta.1`.
 
 Os detalhes de segurança, decisões de compatibilidade e validação desta evolução estão em [docs/development/tui-file-operations.md](docs/development/tui-file-operations.md).
 

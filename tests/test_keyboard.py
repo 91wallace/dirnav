@@ -10,9 +10,9 @@ def test_windows_function_key_codes_are_decoded(dirnav_module, monkeypatch):
     assert dirnav_module.read_key(None, timeout=0) == "F1"
 
 
-def test_windows_f5_f6_f7_f8_codes_are_decoded(dirnav_module, monkeypatch):
+def test_windows_f5_f6_f7_codes_are_decoded(dirnav_module, monkeypatch):
     keys = []
-    for code in ("?", "@", "A", "B"):
+    for code in ("?", "@", "A"):
         sequence = iter(("\xe0", code))
         fake_console = SimpleNamespace(
             kbhit=lambda: True, getwch=lambda keys=sequence: next(keys)
@@ -21,7 +21,7 @@ def test_windows_f5_f6_f7_f8_codes_are_decoded(dirnav_module, monkeypatch):
         monkeypatch.setattr(dirnav_module, "msvcrt", fake_console, raising=False)
         keys.append(dirnav_module.read_key(None, timeout=0))
 
-    assert keys == ["F5", "F6", "F7", "F8"]
+    assert keys == ["F5", "F6", "F7"]
 
 
 def test_windows_delete_key_is_decoded_for_file_removal(dirnav_module, monkeypatch):
@@ -34,7 +34,7 @@ def test_windows_delete_key_is_decoded_for_file_removal(dirnav_module, monkeypat
 
 
 def test_posix_function_key_sequences_are_decoded(dirnav_module, monkeypatch):
-    sequences = iter((b"\x1bOP", b"\x1b[15~", b"\x1b[17~", b"\x1b[18~", b"\x1b[19~", b"\x1b[3~"))
+    sequences = iter((b"\x1bOP", b"\x1b[15~", b"\x1b[17~", b"\x1b[18~", b"\x1b[3~"))
     pending = []
 
     def read_byte(_fd, _size):
@@ -49,12 +49,11 @@ def test_posix_function_key_sequences_are_decoded(dirnav_module, monkeypatch):
     monkeypatch.setattr(dirnav_module.os, "read", read_byte)
     monkeypatch.setattr(dirnav_module.select, "select", select_ready)
 
-    assert [dirnav_module.read_key(1, timeout=0.1) for _ in range(6)] == [
+    assert [dirnav_module.read_key(1, timeout=0.1) for _ in range(5)] == [
         "F1",
         "F5",
         "F6",
         "F7",
-        "F8",
         "DELETE",
     ]
 

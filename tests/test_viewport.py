@@ -37,15 +37,20 @@ def test_viewport_invariant_when_scrolling_down_past_fifth_item(dirnav_module, t
         expected_folder_name = items[selected_idx]
         plain_lines = [strip_ansi(line) for line in lines]
 
-        # Verifica se a pasta selecionada aparece na tela com o marcador '>'
+        # A selecao e indicada somente pelo contorno reverso, sem marcador textual.
         selected_lines = [
-            line for line in plain_lines if f"> {expected_folder_name}/" in line
+            (line, strip_ansi(line))
+            for line in lines
+            if f"{expected_folder_name}/" in strip_ansi(line)
         ]
         assert len(selected_lines) == 1, (
             f"Falha no indice {selected_idx} ({expected_folder_name}): "
             f"item selecionado ficou invisivel! Linhas renderizadas:\n"
             + "\n".join(plain_lines)
         )
+        raw_selected, plain_selected = selected_lines[0]
+        assert "\033[7m" in raw_selected
+        assert "> " not in plain_selected
 
 
 def test_viewport_invariant_scrolling_up_and_down_various_sizes(dirnav_module):
@@ -106,7 +111,7 @@ def test_filesystem_control_characters_are_not_written_as_terminal_escapes(
     assert "�" in rendered
 
 
-def test_footer_stays_on_last_usable_row_without_overlapping_content(dirnav_module, tmp_path):
+def test_navigation_layout_uses_terminal_space_without_persistent_shortcut_rows(dirnav_module, tmp_path):
     (tmp_path / "folder").mkdir()
     (tmp_path / "readme.txt").write_text("read me", encoding="utf-8")
     lines, _, _ = dirnav_module.build_ui_lines(
@@ -116,45 +121,23 @@ def test_footer_stays_on_last_usable_row_without_overlapping_content(dirnav_modu
         scroll_offset=0,
         max_lines=4,
         term_columns=80,
-        footer_text=dirnav_module.build_footer(80),
     )
 
-    layout = dirnav_module.layout_ui_lines(lines, terminal_rows=20)
+    layout = dirnav_module.layout_ui_lines(lines, terminal_rows=20, footer_rows=0)
 
-    assert layout[-1].endswith("Esc:Voltar\033[0m")
     assert len(layout) == 19
     assert "folder/" in "\n".join(strip_ansi(line) for line in layout)
     assert "readme.txt" in "\n".join(strip_ansi(line) for line in layout)
+    assert not any(label in "\n".join(layout) for label in ("Enter:Selecionar", "F5:Copiar", "F7:Exibir"))
 
 
-def test_footer_truncates_in_narrow_terminal_and_updates_by_context(dirnav_module):
-    navigation = dirnav_module.build_footer(14, "navigation")
-    compact_navigation = dirnav_module.build_footer(40, "navigation")
-    destination = dirnav_module.build_footer(14, "destination")
-    help_footer = dirnav_module.build_footer(8, "help")
-
-    assert len(navigation) <= 14
-    assert len(destination) <= 14
-    assert len(help_footer) <= 8
-    assert navigation != destination
-    assert navigation == "Del:Apagar"
-    assert "F7:Exibir arq" in compact_navigation
-    assert "F8:Arq ocultos" in compact_navigation
-    assert "Del:Apagar" in compact_navigation
-    full = dirnav_module.build_footer(120)
-    for legend in (
-        "F5:Cop",
-        "F6:Mov",
-        "F7:Exibir arquivos",
-        "F8:Arquivos Ocultos",
-        "Del:Apagar",
-        "Esc:Voltar",
-    ):
-        assert legend in full
-    file_mode = dirnav_module.build_footer(160, show_files=True)
-    hidden_mode = dirnav_module.build_footer(180, show_files=True, show_hidden_files=True)
-    assert "F7:Somente diretorios" in file_mode
-    assert "F8:Ocultar arquivos do sistema" in hidden_mode
+def test_removed_tools_are_absent_from_help_and_runtime_modules(dirnav_module):
+    help_text = "\n".join(dirnav_module.build_help_lines(120, 24))
+    assert "dirnav --help" in help_text
+    assert all(shortcut not in help_text for shortcut in ("F1", "F5", "F6", "F7", "F2", "F3", "F4", "F12"))
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    for module in ("dirnav_editor.py", "dirnav_features.py", "dirnav_modes.py", "dirnav_storage.py", "requirements.txt"):
+        assert not os.path.exists(os.path.join(project_root, module))
 
 
 def test_unicode_cell_width_and_truncation_fit_terminal(dirnav_module):
@@ -165,17 +148,32 @@ def test_unicode_cell_width_and_truncation_fit_terminal(dirnav_module):
 
 
 def test_help_screen_lists_file_operations_and_existing_key_semantics(dirnav_module):
-    lines = dirnav_module.build_help_lines(term_columns=120, terminal_rows=20)
-    rendered = "\n".join(lines)
+    import subprocess
+    import sys
 
-    assert "F5: copiar" in rendered
-    assert "F6: mover" in rendered
-    assert "F7: alternar entre arquivos e somente diretorios" in rendered
-    assert "F8: exibir/ocultar arquivos ocultos ou do sistema" in rendered
-    assert "Del: apagar" in rendered
-    assert "Q nao encerra" in rendered
-    assert "F1: mostrar/fechar ajuda" in rendered
-    assert "Esc ou Ctrl+C: cancelar" in rendered
+    root = os.path.dirname(os.path.dirname(__file__))
+    result = subprocess.run(
+        [sys.executable, os.path.join(root, "dirnav"), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    for shortcut in (
+        "Enter",
+        "Backspace",
+        "Esc",
+        "F1",
+        "F5",
+        "F6",
+        "F7",
+        "Del",
+    ):
+        assert shortcut in result.stdout
+    assert "F2" not in result.stdout
+    assert "F3" not in result.stdout
+    assert "F4" not in result.stdout
+    assert "F12" not in result.stdout
 
 
 def test_small_terminal_layout_keeps_footer_and_bounds_rows(dirnav_module):
@@ -184,6 +182,8 @@ def test_small_terminal_layout_keeps_footer_and_bounds_rows(dirnav_module):
         layout = dirnav_module.layout_ui_lines(lines, terminal_rows=rows)
         assert len(layout) <= max(1, rows - 1)
         assert layout[-1] == "footer"
+        content_layout = dirnav_module.layout_ui_lines(lines, terminal_rows=rows, footer_rows=0)
+        assert len(content_layout) <= max(1, rows - 1)
 
 
 def test_file_listing_preserves_directory_first_order(dirnav_module, tmp_path):
@@ -202,7 +202,34 @@ def test_file_listing_preserves_directory_first_order(dirnav_module, tmp_path):
     ]
 
 
-def test_f8_lists_hidden_files_when_files_are_enabled_but_hides_hidden_directories(
+def test_enhanced_tree_keeps_root_parent_current_and_child_branches(dirnav_module, tmp_path):
+    current = tmp_path / "root" / "parent" / "current"
+    current.mkdir(parents=True)
+    (current / "alpha").mkdir()
+    (current / "beta").mkdir()
+    lines, selected, offset = dirnav_module.build_ui_lines(
+        current_path=str(current),
+        items=["alpha", "beta"],
+        selected_idx=0,
+        scroll_offset=0,
+        max_lines=8,
+        term_columns=120,
+        tree_view=True,
+    )
+    rendered = [strip_ansi(line) for line in lines]
+
+    assert dirnav_module.tree_header_rows(str(current), tree_view=True) == 3
+    assert str(tmp_path / "root") in rendered[0]
+    assert "└─" in rendered[1] and "parent" in rendered[1]
+    assert "└─" in rendered[2] and "current" in rendered[2]
+    assert "├─" in rendered[3] and "alpha" in rendered[3]
+    assert "└─" in rendered[4] and "beta" in rendered[4]
+    assert dirnav_module.ICON_FOLDER_OPEN in lines[2]
+    assert dirnav_module.ICON_FOLDER_CLOSED in lines[3]
+    assert selected == 0 and offset == 0
+
+
+def test_hidden_files_are_listed_when_enabled_but_hidden_directories_stay_hidden(
     dirnav_module, tmp_path
 ):
     (tmp_path / "visible-directory").mkdir()
@@ -225,7 +252,7 @@ def test_f8_lists_hidden_files_when_files_are_enabled_but_hides_hidden_directori
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires Windows hidden file attributes")
-def test_f8_reads_windows_hidden_and_system_file_attributes(dirnav_module, tmp_path):
+def test_windows_hidden_and_system_file_attributes_are_respected(dirnav_module, tmp_path):
     hidden_file = tmp_path / "windows-hidden.txt"
     hidden_file.write_text("hidden", encoding="utf-8")
     kernel32 = ctypes.windll.kernel32
@@ -253,7 +280,7 @@ def test_f8_reads_windows_hidden_and_system_file_attributes(dirnav_module, tmp_p
             raise ctypes.WinError(ctypes.get_last_error())
 
 
-def test_f7_and_f8_toggle_file_modes_and_preserve_selection(
+def test_f7_toggles_file_mode_and_all_argument_includes_hidden_files(
     dirnav_module, tmp_path
 ):
     (tmp_path / "alpha").mkdir()
@@ -270,14 +297,6 @@ def test_f7_and_f8_toggle_file_modes_and_preserve_selection(
     assert state.filtered_dirs[state.selected_idx] == "alpha"
     assert "Arquivos exibidos" in state.status_message
 
-    state.handle_key("F8")
-
-    assert state.show_hidden_files
-    assert ".secret.txt" in state.filtered_dirs
-    assert state.filtered_dirs[state.selected_idx] == "alpha"
-    assert "ocultos" in state.status_message
-
-    state.handle_key("F7")
-
-    assert not state.show_files
-    assert state.filtered_dirs == ["alpha"]
+    all_state = dirnav_module.NavigatorState(str(tmp_path), show_all=True)
+    assert all_state.show_files and all_state.show_hidden_files
+    assert ".secret.txt" in all_state.filtered_dirs

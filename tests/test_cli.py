@@ -205,7 +205,8 @@ def test_setup_and_uninstall_shell_integration_idempotent(
 
 def test_generated_posix_integration_preserves_command_status(dirnav_module):
     block = dirnav_module.get_posix_integration_block("dn")
-    assert "command dirnav --cwd-file=\"$tmp\" \"$@\" || dirnav_status=$?" in block
+    assert 'command dirnav --cwd-file="$tmp" "$@" || dirnav_status=$?' in block
+    assert "DIRNAV_SHELL=" not in block
     assert 'return "$dirnav_status"' in block
 
 

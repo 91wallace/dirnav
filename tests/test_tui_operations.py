@@ -10,6 +10,7 @@ DIRNAV_SCRIPT = PROJECT_ROOT / "dirnav"
 def run_tui(tmp_path, keys):
     environment = os.environ.copy()
     environment["DIRNAV_TEST_KEYS"] = ",".join(keys)
+    environment["DIRNAV_CONFIG_DIR"] = str(tmp_path / "config")
     return subprocess.run(
         [sys.executable, str(DIRNAV_SCRIPT), str(tmp_path)],
         check=False,
@@ -97,7 +98,7 @@ def test_tui_help_does_not_change_q_or_escape_navigation_semantics(tmp_path):
     result = run_tui(tmp_path, ["F1", "ESC"])
 
     assert result.returncode == 0
-    assert "F5: copiar" in result.stderr
+    assert "dirnav --help" in result.stderr
 
 
 def test_question_mark_remains_search_text_not_help_shortcut(tmp_path):
@@ -106,3 +107,38 @@ def test_question_mark_remains_search_text_not_help_shortcut(tmp_path):
 
     assert result.returncode == 0
     assert "Ajuda do dirnav" not in result.stderr
+
+
+def test_navigation_screen_has_no_persistent_shortcut_bars(tmp_path):
+    (tmp_path / "folder").mkdir()
+    result = run_tui(tmp_path, ["ESC"])
+
+    assert result.returncode == 0, result.stderr
+    for label in (
+        "Enter:Selecionar",
+        "Backspace:Dir Atual",
+        "Esc:Voltar",
+        "F5:Copiar",
+        "F6:Mover",
+        "Del:Deletar",
+        "F7:Exibir arquivos",
+    ):
+        assert label not in result.stderr
+    assert "folder" in result.stderr
+
+
+def test_destination_picker_has_no_shortcut_bar(tmp_path):
+    (tmp_path / "source.txt").write_text("source", encoding="utf-8")
+    result = run_tui(tmp_path, ["F7", *list("source.txt"), "F5", "ESC", "ESC"])
+
+    assert result.returncode == 0, result.stderr
+    assert "F7:Exibir arquivos" not in result.stderr
+    assert "Enter:Selecionar destino" not in result.stderr
+
+
+def test_enter_on_file_does_not_open_a_viewer(tmp_path):
+    (tmp_path / "readme.txt").write_text("readable", encoding="utf-8")
+    result = run_tui(tmp_path, ["F7", *list("readme.txt"), "ENTER", "ESC", "ESC"])
+    assert result.returncode == 0, result.stderr
+    assert "Visualizando:" not in result.stderr
+    assert "readable" not in result.stderr

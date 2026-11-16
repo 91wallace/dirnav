@@ -4,7 +4,6 @@ import ctypes
 import os
 import re
 import secrets
-import shutil
 import signal
 import sys
 import time
@@ -23,6 +22,10 @@ from dirnav_operations import (
 )
 
 __version__ = "1.0.0"
+ICON_FOLDER_CLOSED = "\U0001F5C0\uFE0E"
+ICON_FOLDER_OPEN = "\U0001F5C1\uFE0E"
+MAX_VISIBLE_ITEMS = 15
+ANSI_SEQUENCE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 try:
     import select
@@ -50,12 +53,58 @@ def sanitize_terminal_text(text):
 
 
 def terminal_cell_width(text):
+    text = ANSI_SEQUENCE.sub("", text)
     width = 0
     for char in text:
-        if unicodedata.combining(char):
+        if unicodedata.combining(char) or char in ("\ufe0e", "\ufe0f"):
             continue
         width += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
     return width
+
+
+def truncate_terminal_line(text, max_cells):
+    if max_cells <= 0:
+        return ""
+    if terminal_cell_width(text) <= max_cells:
+        return text
+    output = []
+    used = 0
+    cursor = 0
+    for match in ANSI_SEQUENCE.finditer(text):
+        plain = text[cursor : match.start()]
+        for char in plain:
+            char_width = 0 if unicodedata.combining(char) else (
+                2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+            )
+            if used + char_width > max_cells:
+                output.append("\033[0m")
+                return "".join(output)
+            output.append(char)
+            used += char_width
+        output.append(match.group(0))
+        cursor = match.end()
+    for char in text[cursor:]:
+        char_width = 0 if unicodedata.combining(char) else (
+            2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+        )
+        if used + char_width > max_cells:
+            output.append("\033[0m")
+            return "".join(output)
+        output.append(char)
+        used += char_width
+    return "".join(output)
+
+
+def get_terminal_size(fallback=(80, 24)):
+    """Read live terminal dimensions, ignoring stale COLUMNS/LINES values."""
+    for stream in (sys.stdin, sys.stderr, sys.stdout):
+        try:
+            size = os.get_terminal_size(stream.fileno())
+            if size.columns > 0 and size.lines > 0:
+                return size
+        except (OSError, ValueError, AttributeError):
+            continue
+    return os.terminal_size(fallback)
 
 
 def truncate_text(text, max_cells, from_end=False):
@@ -197,6 +246,22 @@ def compute_viewport(total_items, selected_idx, scroll_offset, max_lines):
     return selected_idx, scroll_offset, available_for_items, has_above, has_below
 
 
+def tree_header_rows(current_path, tree_view):
+    """Return how many fixed path rows the tree renderer needs."""
+    if not tree_view:
+        return 1
+    current = os.path.abspath(current_path)
+    parent = os.path.dirname(current)
+    if not parent or os.path.normcase(parent) == os.path.normcase(current):
+        return 1
+    grandparent = os.path.dirname(parent)
+    return (
+        3
+        if grandparent and os.path.normcase(grandparent) != os.path.normcase(parent)
+        else 2
+    )
+
+
 def build_ui_lines(
     current_path,
     items,
@@ -205,9 +270,9 @@ def build_ui_lines(
     max_lines,
     term_columns,
     search_query="",
-    footer_text=None,
     heading=None,
     status_message="",
+    tree_view=False,
 ):
     """Constroi a lista de linhas formatadas com ANSI para renderizacao."""
     (
@@ -221,11 +286,57 @@ def build_ui_lines(
     lines = []
     max_name_len = max(1, term_columns - (8 if term_columns >= 12 else 1))
 
-    # Primeira linha: diretorio atual exibido a esquerda (raiz)
-    safe_path = sanitize_terminal_text(current_path)
-    curr_disp = truncate_text(safe_path, max_name_len, from_end=True)
-    path_label = f"📁 {curr_disp}" if term_columns >= 4 else curr_disp
-    lines.append(f"\033[1;36m{truncate_text(path_label, term_columns)}\033[0m")
+    tree_child_indent = ""
+    current = os.path.abspath(current_path)
+    parent = os.path.dirname(current)
+    has_tree_parent = (
+        tree_view
+        and parent
+        and os.path.normcase(parent) != os.path.normcase(current)
+    )
+    if has_tree_parent:
+        connector = "└─ " if term_columns >= 8 else "└ " if term_columns >= 4 else "└"
+        connector_width = terminal_cell_width(connector)
+        root = os.path.dirname(parent)
+        has_grandparent = (
+            root and os.path.normcase(root) != os.path.normcase(parent)
+        )
+        root_path = root if has_grandparent else parent
+        root_label = f"{ICON_FOLDER_OPEN} {sanitize_terminal_text(root_path)}"
+        lines.append(
+            f"\033[1;36m{truncate_text(root_label, term_columns, from_end=True)}\033[0m"
+        )
+        current_name = os.path.basename(current.rstrip(os.sep)) or current
+        if has_grandparent:
+            parent_name = os.path.basename(parent.rstrip(os.sep)) or parent
+            parent_branch = (
+                f"{connector}{ICON_FOLDER_OPEN} {sanitize_terminal_text(parent_name)}"
+            )
+            lines.append(
+                f"\033[1;36m{truncate_text(parent_branch, term_columns)}\033[0m"
+            )
+            current_indent = " " * connector_width
+            active_branch = (
+                f"{current_indent}{connector}{ICON_FOLDER_OPEN} "
+                f"{sanitize_terminal_text(current_name)}"
+            )
+            lines.append(
+                f"\033[1;36m{truncate_text(active_branch, term_columns)}\033[0m"
+            )
+            tree_child_indent = " " * (connector_width * 2)
+        else:
+            active_branch = (
+                f"{connector}{ICON_FOLDER_OPEN} {sanitize_terminal_text(current_name)}"
+            )
+            lines.append(
+                f"\033[1;36m{truncate_text(active_branch, term_columns)}\033[0m"
+            )
+            tree_child_indent = " " * connector_width
+    else:
+        safe_path = sanitize_terminal_text(current_path)
+        curr_disp = truncate_text(safe_path, max_name_len, from_end=True)
+        path_label = f"{ICON_FOLDER_OPEN} {curr_disp}" if term_columns >= 4 else curr_disp
+        lines.append(f"\033[1;36m{truncate_text(path_label, term_columns)}\033[0m")
     if heading:
         lines.append(f"\033[1;33m{truncate_text(sanitize_terminal_text(heading), term_columns)}\033[0m")
 
@@ -252,130 +363,67 @@ def build_ui_lines(
             actual_idx = scroll_offset + i
             is_selected = actual_idx == selected_idx
             safe_name = sanitize_terminal_text(d)
-            suffix = "/" if os.path.isdir(os.path.join(current_path, d)) else ""
-            prefix = ("  > " if term_columns >= 10 else ">") if is_selected else (
-                "     " if term_columns >= 10 else ""
-            )
+            is_directory = os.path.isdir(os.path.join(current_path, d))
+            suffix = "/" if is_directory else ""
+            is_last_item = actual_idx == len(items) - 1
+            branch = tree_child_indent + ("└─ " if is_last_item else "├─ ")
+            if term_columns < 8:
+                branch = tree_child_indent + ("└ " if is_last_item else "├ ")
+            if term_columns < 4:
+                branch = tree_child_indent + ("└" if is_last_item else "├")
+            icon = f"{ICON_FOLDER_CLOSED} " if is_directory else ""
+            prefix = branch
             sub_name_len = max(
                 0,
-                term_columns - terminal_cell_width(prefix) - terminal_cell_width(suffix),
+                term_columns
+                - terminal_cell_width(prefix)
+                - terminal_cell_width(icon)
+                - terminal_cell_width(suffix),
             )
             disp_name = truncate_text(safe_name, sub_name_len)
 
             if is_selected:
-                lines.append(f"\033[7m{prefix}{disp_name}{suffix}\033[0m")
+                lines.append(f"\033[7m{prefix}{icon}{disp_name}{suffix}\033[0m")
             else:
-                lines.append(f"\033[1;34m{prefix}{disp_name}{suffix}\033[0m")
+                lines.append(f"\033[1;34m{prefix}{icon}{disp_name}{suffix}\033[0m")
 
         if has_below:
             count_below = len(items) - (scroll_offset + len(visible_items))
             lines.append(f"     \033[90m{truncate_text(f'↓ +{count_below} mais...', max(1, term_columns - 5))}\033[0m")
 
-    if footer_text is not None:
-        if status_message:
-            lines.append(f"\033[33m{truncate_text(sanitize_terminal_text(status_message), term_columns)}\033[0m")
-        lines.append(f"\033[7m{fit_footer(footer_text, term_columns)}\033[0m")
+    if status_message:
+        lines.append(f"\033[33m{truncate_text(sanitize_terminal_text(status_message), term_columns)}\033[0m")
     return lines, selected_idx, scroll_offset
-
-
-def fit_footer(text, term_columns, context="navigation", compact_options=None):
-    """Fit a plain-text footer into a narrow terminal without splitting ANSI codes."""
-    width = max(1, term_columns)
-    if terminal_cell_width(text) <= width:
-        return text
-    compact_options = compact_options or {
-        "navigation": ("F5:Cop F6:Mov F7:Arquivos F8:Ocultos Del:Apagar", "Del:Apagar"),
-        "destination": ("F7:Arquivos F8:Ocultos Enter:Sel Esc:Vol", "Enter:Sel Esc:Vol"),
-        "confirmation": ("Enter:Confirmar Esc:Cancelar", "Enter:Sim Esc:Não", "Esc:Cancelar"),
-        "conflict": ("S:Substituir R:Renomear Esc:Cancelar", "S:Subst R:Nome Esc:Cancelar", "R:Nome Esc:Cancelar"),
-        "help": ("Esc:Voltar",),
-    }.get(context, ("↑/↓:Navegar Enter:Abrir Esc:Cancelar", "Esc:Cancelar"))
-    for option in compact_options:
-        if terminal_cell_width(option) <= width:
-            return option
-    return truncate_text(compact_options[-1], width)
-
-
-def build_footer(
-    term_columns,
-    context="navigation",
-    show_files=False,
-    show_hidden_files=False,
-):
-    files_toggle = "Somente diretorios" if show_files else "Exibir arquivos"
-    hidden_toggle = "Ocultar arquivos do sistema" if show_hidden_files else "Arquivos Ocultos"
-    compact_files_toggle = "Som dirs" if show_files else "Exibir arq"
-    compact_hidden_toggle = "Ocultar sist" if show_hidden_files else "Arq ocultos"
-    if context == "destination":
-        text = (
-            f"↑/↓: Navegar | F7:{files_toggle} | F8:{hidden_toggle} | "
-            "→: Abrir | Enter: Selecionar destino | Esc: Voltar"
-        )
-        compact_options = (
-            f"F7:{files_toggle} F8:{hidden_toggle} Enter:Sel Esc:Voltar",
-            f"F7:{files_toggle} F8:{hidden_toggle}",
-            "Enter:Sel Esc:Vol",
-            "Esc:Voltar",
-        )
-    elif context == "confirmation":
-        text = "Enter: Confirmar | Esc: Cancelar"
-        compact_options = None
-    elif context == "conflict":
-        text = "S: Substituir | R: Renomear | Esc: Cancelar"
-        compact_options = None
-    elif context == "help":
-        text = "Esc/F1: Voltar"
-        compact_options = None
-    else:
-        text = (
-            "↑/↓: Navegar | Enter: Selecionar | F5: Copiar | F6: Mover | "
-            f"F7:{files_toggle} | F8:{hidden_toggle} | Del:Apagar | Esc: Voltar"
-        )
-        compact_options = (
-            f"Enter:Sel F5:Cop F6:Mov F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
-            f"F5:Cop F6:Mov F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
-            f"Enter:Sel F7:{files_toggle} F8:{hidden_toggle} Del:Apagar Esc:Voltar",
-            f"F7:{files_toggle} F8:{hidden_toggle} Del:Apagar",
-            f"F7:{compact_files_toggle} F8:{compact_hidden_toggle} Del:Apagar",
-            f"F7:{files_toggle} F8:{hidden_toggle}",
-            f"F7:{compact_files_toggle} F8:{compact_hidden_toggle}",
-            "Enter:Sel Esc:Vol",
-            "Del:Apagar",
-        )
-    return fit_footer(text, term_columns, context, compact_options)
 
 
 def build_help_lines(term_columns, terminal_rows):
     rows = [
         "Ajuda do dirnav",
-        "Setas cima/baixo: selecionar | Direita/Tab: entrar | Esquerda: voltar",
-        "Enter: escolher diretorio selecionado | Backspace: filtrar ou confirmar diretorio atual",
-        "F5: copiar item selecionado para um diretorio escolhido",
-        "F6: mover item selecionado para um diretorio escolhido",
-        "F7: alternar entre arquivos e somente diretorios",
-        "F8: exibir/ocultar arquivos ocultos ou do sistema",
-        "Del: apagar item selecionado apos confirmacao permanente",
-        "F1: mostrar/fechar ajuda | Esc ou Ctrl+C: cancelar",
-        "As letras, inclusive Q, continuam sendo texto de busca; Q nao encerra a sessao.",
-        "Na escolha do destino: Direita entra e Enter seleciona o diretorio atual.",
+        "Consulte dirnav --help ou dirnav -h antes de iniciar para ver os atalhos.",
+        "Digite para filtrar a lista. Feche esta tela para voltar a navegacao.",
     ]
     width = max(1, term_columns)
     usable = max(1, terminal_rows - 1)
-    return [truncate_text(line, width) for line in rows[:usable - 1]] + [
-        build_footer(term_columns, "help")
-    ]
+    return [truncate_terminal_line(line, width) for line in rows[:usable]]
 
 
-def layout_ui_lines(lines, terminal_rows):
-    """Anchor the last line (footer) near the terminal bottom while reserving a prompt row."""
+def layout_ui_lines(lines, terminal_rows, footer_rows=1):
+    """Lay out content with optional contextual footer rows and one prompt row."""
     if not lines:
         return []
     usable_rows = max(1, terminal_rows - 1)
+    footer_rows = min(max(0, footer_rows), usable_rows)
     if len(lines) > usable_rows:
-        lines = lines[: usable_rows - 1] + [lines[-1]]
-    content, footer = lines[:-1], lines[-1]
+        if footer_rows:
+            lines = lines[: usable_rows - footer_rows] + lines[-footer_rows:]
+        else:
+            lines = lines[:usable_rows]
+    if footer_rows:
+        content, footers = lines[:-footer_rows], lines[-footer_rows:]
+    else:
+        content, footers = lines, []
     padding = max(0, usable_rows - len(lines))
-    return content + ([""] * padding) + [footer]
+    return content + ([""] * padding) + footers
 
 
 def read_key(fd, timeout=None):
@@ -395,9 +443,7 @@ def read_key(fd, timeout=None):
                 63: "F5",
                 64: "F6",
                 65: "F7",
-                66: "F8",
                 133: "F11",
-                134: "F12",
             }
             if ord(ch2) in function_keys:
                 return function_keys[ord(ch2)]
@@ -481,8 +527,6 @@ def read_key(fd, timeout=None):
                     return "F6"
                 elif seq == b"\x1b[18~":
                     return "F7"
-                elif seq == b"\x1b[19~":
-                    return "F8"
                 return ""
             return "ESC"
         if b in (b"\r", b"\n"):
@@ -513,7 +557,7 @@ def read_key(fd, timeout=None):
 class NavigatorState:
     """Maquina de estados desacoplada para navegacao e filtragem de diretorios."""
 
-    def __init__(self, start_path, max_lines=8):
+    def __init__(self, start_path, max_lines=MAX_VISIBLE_ITEMS + 1, show_all=False):
         self.current_path = os.path.abspath(start_path)
         self.search_query = ""
         self.selected_idx = 0
@@ -523,8 +567,8 @@ class NavigatorState:
         self.finished = False
         self.target_path = None
         self.status_message = ""
-        self.show_files = False
-        self.show_hidden_files = False
+        self.show_files = bool(show_all)
+        self.show_hidden_files = bool(show_all)
         self.all_dirs = []
         self.filtered_dirs = []
         self.refresh_dirs()
@@ -555,15 +599,6 @@ class NavigatorState:
             else "Somente diretorios exibidos."
         )
 
-    def toggle_hidden_files(self):
-        self.show_hidden_files = not self.show_hidden_files
-        self._refresh_preserving_selection()
-        self.status_message = (
-            "Arquivos ocultos e do sistema serao exibidos com os arquivos."
-            if self.show_hidden_files
-            else "Arquivos ocultos e do sistema serao ocultados."
-        )
-
     def apply_filter(self):
         self.filtered_dirs = filter_directories(self.all_dirs, self.search_query)
         (
@@ -588,10 +623,6 @@ class NavigatorState:
         if key == "F7":
             self.toggle_files()
             return
-        if key == "F8":
-            self.toggle_hidden_files()
-            return
-
         if key == "UP":
             if self.selected_idx > 0:
                 self.selected_idx -= 1
@@ -728,11 +759,30 @@ class FileOperationController:
             )
             self.summary = deletion_summary(self.source)
         else:
-            self.destination_navigator = NavigatorState(navigator.current_path)
+            self.destination_navigator = NavigatorState(
+                navigator.current_path,
+                show_all=navigator.show_files and navigator.show_hidden_files,
+            )
+            self.destination_navigator.show_files = navigator.show_files
+            self.destination_navigator.show_hidden_files = navigator.show_hidden_files
+            self.destination_navigator.refresh_dirs()
 
     @property
     def is_destination_phase(self):
         return self.phase == "destination"
+
+    @property
+    def confirmation_prompt(self):
+        """Return a one-line destructive-action prompt for the status area."""
+        name = os.path.basename(self.source.rstrip(os.sep)) or self.source
+        if self.action == "delete":
+            if self.source_snapshot["kind"] == "directory":
+                return (
+                    f"Enter:Sim Esc:Nao | Apagar permanentemente {name} "
+                    f"({self.summary['files']} arq/{self.summary['directories']} dirs)"
+                )
+            return f"Enter:Sim Esc:Nao | Apagar permanentemente {name}"
+        return "Enter:Confirmar | Esc:Cancelar"
 
     def _select_destination(self):
         destination = self.destination_navigator.current_path
@@ -785,7 +835,7 @@ class FileOperationController:
             elif key == "\b":
                 if self.destination_navigator.search_query:
                     self.destination_navigator.handle_key(key)
-            elif key in ("UP", "DOWN", "LEFT", "RIGHT", "TAB", "HOME", "END", "PAGEUP", "PAGEDOWN", "F7", "F8") or (
+            elif key in ("UP", "DOWN", "LEFT", "RIGHT", "TAB", "HOME", "END", "PAGEUP", "PAGEDOWN", "F7") or (
                 len(key) == 1 and key.isprintable()
             ):
                 self.destination_navigator.handle_key(key)
@@ -893,7 +943,7 @@ class FileOperationController:
             if self.source_snapshot["kind"] in ("symlink", "junction"):
                 lines.append("O link sera tratado como um item; seu alvo nao sera percorrido.")
             lines.append("Enter confirmar | Esc cancelar")
-        max_content = max(1, rows - 2)
+        max_content = max(1, rows - 1)
         return [truncate_text(line, columns) for line in lines[:max_content]]
 
 
@@ -1089,6 +1139,8 @@ def parse_args(argv):
             i += 1
         elif arg in ("--help", "-h"):
             action = "help"
+            i += 1
+        elif arg in ("--all", "-a"):
             i += 1
         elif arg in ("--cwd-file", "--cmd-cwd-file") and i + 1 < len(argv):
             cwd_file = argv[i + 1]
@@ -1523,8 +1575,26 @@ def main():
         sys.exit(0)
     elif action == "help":
         print(
-            f"dirnav {__version__} - Navegador de diretorios inline\n"
-            "Uso: dn [caminho] | cc [caminho] | dirnav [--setup|--uninstall|--version]"
+            f"dirnav {__version__} - Navegador de diretorios em arvore\n"
+            "Uso: dirnav [--all|-a] [caminho]\n\n"
+            "Opcoes:\n"
+            "  -a, --all       Inicia exibindo arquivos, inclusive ocultos e do sistema\n"
+            "  -h, --help      Mostra esta lista de comandos e atalhos\n"
+            "      --setup     Configura a integracao do shell\n"
+            "      --uninstall Remove a integracao do shell\n"
+            "  -v, --version   Mostra a versao\n\n"
+            "Atalhos no TUI:\n"
+            "  Setas cima/baixo  Navegar pela lista\n"
+            "  Direita/Tab       Entrar na pasta\n"
+            "  Enter             Selecionar o diretorio atual/confirmar\n"
+            "  Backspace         Usar o diretorio atual ou apagar filtro\n"
+            "  Esc               Voltar/cancelar\n"
+            "  F5                Copiar item\n"
+            "  F6                Mover item\n"
+            "  Del               Excluir apos confirmacao\n"
+            "  F7                Exibir arquivos ou somente diretorios\n"
+            "  F1                Mostrar ajuda durante a navegacao\n"
+            "  Conflitos         S substitui uma copia; R escolhe outro nome"
         )
         sys.exit(0)
     elif action == "setup":
@@ -1565,29 +1635,41 @@ def main():
     ui_out = sys.stderr
     prev_line_count = 0
     last_render_signature = None
+    last_render_size = None
 
-    def render_lines(lines, terminal_rows):
-        nonlocal prev_line_count, last_render_signature
+    def render_lines(lines, terminal_rows, footer_rows=0, terminal_columns=None):
+        nonlocal prev_line_count, last_render_signature, last_render_size
         if not lines:
             lines = ["\033[90m(nenhuma subpasta)\033[0m"]
-        display_lines = layout_ui_lines(lines, terminal_rows)
-        signature = (tuple(display_lines), terminal_rows)
+        if terminal_columns is None:
+            terminal_columns = get_terminal_size((80, 24)).columns
+        display_lines = layout_ui_lines(lines, terminal_rows, footer_rows)
+        screen_size = (terminal_rows, terminal_columns)
+        signature = (tuple(display_lines), screen_size)
         if signature == last_render_signature:
             return
 
         out = []
-        if prev_line_count > 1:
-            out.append(f"\033[{prev_line_count - 1}A\r")
-        elif prev_line_count == 1:
-            out.append("\r")
+        resized = last_render_size is not None and screen_size != last_render_size
+        if resized:
+            # Limpa sobras do layout anterior, que pode ter sido reflowado pelo
+            # teclado virtual antes de o terminal reportar a nova dimensao.
+            out.append("\033[2J\033[H")
+            for row, line in enumerate(display_lines, start=1):
+                out.append(f"\033[{row};1H\033[2K{line}")
+        else:
+            if prev_line_count > 1:
+                out.append(f"\033[{prev_line_count - 1}A\r")
+            elif prev_line_count == 1:
+                out.append("\r")
 
-        for i, line in enumerate(display_lines):
-            if i < len(display_lines) - 1:
-                out.append(f"\033[2K{line}\r\n")
-            else:
-                out.append(f"\033[2K{line}")
+            for i, line in enumerate(display_lines):
+                if i < len(display_lines) - 1:
+                    out.append(f"\033[2K{line}\r\n")
+                else:
+                    out.append(f"\033[2K{line}")
 
-        if prev_line_count > len(display_lines):
+        if not resized and prev_line_count > len(display_lines):
             diff = prev_line_count - len(display_lines)
             for _ in range(diff):
                 out.append("\r\n\033[2K")
@@ -1595,6 +1677,7 @@ def main():
 
         prev_line_count = len(display_lines)
         last_render_signature = signature
+        last_render_size = screen_size
         ui_out.write("".join(out))
         ui_out.flush()
 
@@ -1624,24 +1707,23 @@ def main():
         ui_out.write("".join(out))
         ui_out.flush()
 
-    state = NavigatorState(initial_path)
+    show_all = any(arg in ("--all", "-a") for arg in sys.argv[1:])
+    state = NavigatorState(initial_path, show_all=show_all)
     active_operation = None
     help_visible = False
 
     def render_current(term_size=None):
         if term_size is None:
-            term_size = shutil.get_terminal_size((80, 24))
+            term_size = get_terminal_size((80, 24))
         rows = max(1, term_size.lines)
         columns = max(1, term_size.columns)
+        context_footer_rows = 0
         if help_visible:
             lines = build_help_lines(columns, rows)
         elif active_operation is not None and active_operation.is_destination_phase:
             destination_state = active_operation.destination_navigator
             has_filter = bool(destination_state.search_query)
-            item_rows = max(
-                1,
-                min(8, rows - 1 - 1 - 1 - int(has_filter)),
-            )
+            item_rows = max(1, min(MAX_VISIBLE_ITEMS + 1, rows - 1 - 2 - int(has_filter)))
             lines, destination_state.selected_idx, destination_state.scroll_offset = build_ui_lines(
                 destination_state.current_path,
                 destination_state.filtered_dirs,
@@ -1650,31 +1732,20 @@ def main():
                 item_rows,
                 columns,
                 destination_state.search_query,
-                footer_text=build_footer(
-                    columns,
-                    "destination",
-                    destination_state.show_files,
-                    destination_state.show_hidden_files,
-                ),
                 heading=f"Destino para {active_operation.action}: selecione a pasta atual",
                 status_message=destination_state.status_message,
             )
-        elif active_operation is not None:
-            lines = active_operation.screen_lines(columns, rows) or []
-            if active_operation.progress_text:
-                lines.append(truncate_text(active_operation.progress_text, columns))
-            if active_operation.phase == "conflict" and active_operation.action == "move":
-                footer = fit_footer("R renomear | Esc cancelar", columns, "conflict")
-            else:
-                context = "conflict" if active_operation.phase == "conflict" else "confirmation"
-                footer = build_footer(columns, context)
-            lines.append(footer)
-        else:
+            context_footer_rows = 0
+        elif (
+            active_operation is not None
+            and active_operation.action == "delete"
+            and active_operation.phase == "confirm"
+        ):
             has_filter = bool(state.search_query)
-            has_status = bool(state.status_message)
+            header_rows = tree_header_rows(state.current_path, tree_view=True)
             item_rows = max(
                 1,
-                min(8, rows - 1 - 1 - int(has_filter) - 1 - int(has_status)),
+                min(MAX_VISIBLE_ITEMS + 1, rows - 1 - header_rows - int(has_filter) - 1),
             )
             lines, state.selected_idx, state.scroll_offset = build_ui_lines(
                 state.current_path,
@@ -1684,14 +1755,51 @@ def main():
                 item_rows,
                 columns,
                 state.search_query,
-                footer_text=build_footer(
-                    columns,
-                    show_files=state.show_files,
-                    show_hidden_files=state.show_hidden_files,
-                ),
-                status_message=state.status_message,
+                status_message=active_operation.confirmation_prompt,
+                tree_view=True,
             )
-        render_lines(lines, rows)
+            render_lines(lines, rows, footer_rows=1, terminal_columns=columns)
+            return
+        elif active_operation is not None:
+            lines = active_operation.screen_lines(columns, rows) or []
+            if active_operation.progress_text:
+                lines.append(truncate_text(active_operation.progress_text, columns))
+            context_footer_rows = 0
+        else:
+            has_filter = bool(state.search_query)
+            has_status = bool(state.status_message)
+            header_rows = tree_header_rows(state.current_path, tree_view=True)
+            item_rows = max(
+                1,
+                min(
+                    MAX_VISIBLE_ITEMS + 1,
+                    rows - 1 - header_rows - int(has_filter) - int(has_status),
+                ),
+            )
+            lines, state.selected_idx, state.scroll_offset = build_ui_lines(
+                state.current_path,
+                state.filtered_dirs,
+                state.selected_idx,
+                state.scroll_offset,
+                item_rows,
+                columns,
+                state.search_query,
+                status_message=state.status_message,
+                tree_view=True,
+            )
+            render_lines(
+                lines,
+                rows,
+                footer_rows=int(has_status),
+                terminal_columns=columns,
+            )
+            return
+        render_lines(
+            lines,
+            rows,
+            footer_rows=context_footer_rows,
+            terminal_columns=columns,
+        )
 
     def check_operation_cancelled():
         if active_operation is None or active_operation.cancel_requested:
@@ -1739,7 +1847,7 @@ def main():
         ui_out.flush()
 
         while not state.finished:
-            term_size = shutil.get_terminal_size((80, 24))
+            term_size = get_terminal_size((80, 24))
             render_current(term_size)
 
             if test_key_queue is not None:
