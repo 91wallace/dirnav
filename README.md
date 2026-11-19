@@ -15,7 +15,7 @@ Navegador interativo de diretórios e arquivos para terminal, em Python. A vers�
 
 - Python 3.
 - Windows: CMD, Windows PowerShell 5.1 ou PowerShell 7.
-- Ubuntu/Arch Linux: Bash ou Zsh para atualizar o diretório da sessão atual.
+- Linux e macOS: Bash ou Zsh para atualizar o diretório da sessão atual.
 
 ## Instalação
 
@@ -29,7 +29,7 @@ No clone do repositório, execute no PowerShell:
 
 O instalador configura os launchers e a integração do perfil do usuário. Reinicie o shell ou carregue novamente o perfil.
 
-### Ubuntu
+### Linux e macOS
 
 No clone do repositório, execute:
 
@@ -69,7 +69,7 @@ bash ./tests/shell/test_bash.sh
 bash ./tests/shell/test_installers.sh
 ```
 
-Os testes PowerShell estão em `tests/shell/Dirnav.Tests.ps1`. O teste CMD requer Windows; o teste Zsh requer Zsh instalado.
+Os testes PowerShell estão em `tests/shell/Dirnav.Tests.ps1`. O teste CMD requer Windows; o teste Zsh requer Zsh instalado. O instalador Bash instala em `~/.local/bin` e configura Bash/Zsh; no macOS, confirme que esse diretório está no `PATH`.
 
 ## Histórico
 

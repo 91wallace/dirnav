@@ -15,7 +15,7 @@ Interactive directory and file navigation for the terminal, written in Python. T
 
 - Python 3.
 - Windows: CMD, Windows PowerShell 5.1, or PowerShell 7.
-- Ubuntu/Arch Linux: Bash or Zsh to change the current shell session's directory.
+- Linux and macOS: Bash or Zsh to change the current shell session's directory.
 
 ## Installation
 
@@ -29,7 +29,7 @@ From a repository checkout, run in PowerShell:
 
 The installer configures launchers and the current user's shell profile. Restart the shell or reload the profile.
 
-### Ubuntu
+### Linux and macOS
 
 From a repository checkout, run:
 
@@ -69,7 +69,7 @@ bash ./tests/shell/test_bash.sh
 bash ./tests/shell/test_installers.sh
 ```
 
-PowerShell integration tests are in `tests/shell/Dirnav.Tests.ps1`. The CMD tests require Windows; the Zsh tests require Zsh.
+PowerShell integration tests are in `tests/shell/Dirnav.Tests.ps1`. The CMD tests require Windows; the Zsh tests require Zsh. The Bash installer installs under `~/.local/bin` and configures Bash/Zsh; on macOS, ensure that directory is on your `PATH`.
 
 ## History
 
