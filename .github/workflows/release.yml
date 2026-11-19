@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versao da release (estavel ou beta, ex: 1.0.1-beta.1)'
+        description: 'Versao da release (ex: 1.0.0)'
         required: true
-        default: '1.0.1-beta.1'
+        default: '1.0.0'
       publish_public_artifacts:
         description: 'Confirma explicitamente publicação pública (somente tag estável)'
         type: boolean
@@ -46,7 +46,7 @@ jobs:
 
   build-and-github-release:
     name: Build Windows Binary & Create GitHub Release
-    # Tag pushes run the quality gate only. The approved beta ZIP is uploaded as-is by the maintainer.
+    # Tag pushes run the quality gate only. Build artifacts require manual dispatch.
     if: github.event_name == 'workflow_dispatch'
     needs: quality-gate
     runs-on: windows-latest
@@ -75,9 +75,7 @@ jobs:
           } else {
               $ver = $env:RELEASE_REF.TrimStart('v')
           }
-          if ($ver -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
-              throw "Invalid release version: '$ver'"
-          }
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: '$ver'" }
           if ($env:PUBLISH_PUBLIC -eq 'true') {
               if ($env:RELEASE_EVENT -ne 'workflow_dispatch' -or $env:RELEASE_REF_TYPE -ne 'tag' -or $ver -ne $env:RELEASE_REF.TrimStart('v')) {
                   throw 'Public publishing requires an explicit manual dispatch on the matching stable version tag.'
@@ -158,7 +156,7 @@ jobs:
           Write-Host "ZIP SHA256: $hash"
           "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload controlled beta build artifact
+      - name: Upload Windows build artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:

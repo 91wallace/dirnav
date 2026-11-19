@@ -22,15 +22,12 @@ while (($#)); do
         -y|--yes|--default|--non-interactive) NON_INTERACTIVE=1; shift ;;
         -h|--help)
             printf 'Uso: %s [--shortcut NOME] [--non-interactive]\n' "$0"
-            printf 'Instala somente no usuário atual em ~/.local/bin.\n'
+            printf 'Instala em ~/.local/bin do HOME definido no ambiente.\n'
             exit 0 ;;
         *) fail "Argumento desconhecido: $1" ;;
     esac
 done
 
-if [[ "$(id -u)" == 0 ]]; then
-    fail "Não execute como root/sudo. Este instalador altera somente o HOME do usuário atual."
-fi
 command -v python3 >/dev/null 2>&1 || fail "Python 3 não foi encontrado no PATH."
 PYTHON_VERSION="$(python3 --version 2>&1)" || fail "python3 não inicia corretamente: $PYTHON_VERSION"
 [[ "$PYTHON_VERSION" == Python\ 3.* ]] || fail "python3 não é uma instalação funcional do Python 3: $PYTHON_VERSION"

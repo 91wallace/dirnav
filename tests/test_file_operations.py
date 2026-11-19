@@ -272,10 +272,10 @@ def test_move_failure_preserves_source_and_absent_destination(
     target = tmp_path / "target.txt"
     source.write_text("preserve", encoding="utf-8")
 
-    def deny_rename(_source, _target):
+    def deny_rename(_source, _target, _source_info):
         raise PermissionError("simulated permission failure")
 
-    monkeypatch.setattr(ops.os, "rename", deny_rename)
+    monkeypatch.setattr(ops, "_rename_no_replace", deny_rename)
     with pytest.raises(PermissionError, match="permission"):
         ops.move_entry(source, target)
 
@@ -290,14 +290,14 @@ def test_cross_volume_move_copies_verifies_then_removes_source(
     target_dir = tmp_path / "dest"
     target_dir.mkdir()
     source.write_text("cross volume", encoding="utf-8")
-    original_rename = ops.os.rename
+    original_rename = ops._rename_no_replace
 
-    def cross_volume_once(src, dst):
+    def cross_volume_once(src, dst, source_info):
         if os.path.abspath(src) == os.path.abspath(source):
             raise OSError(errno.EXDEV, "different volume")
-        return original_rename(src, dst)
+        return original_rename(src, dst, source_info)
 
-    monkeypatch.setattr(ops.os, "rename", cross_volume_once)
+    monkeypatch.setattr(ops, "_rename_no_replace", cross_volume_once)
     result = ops.move_entry(source, target_dir / source.name)
 
     assert "copiado e verificado" in result
@@ -312,20 +312,20 @@ def test_cross_volume_move_cleanup_failure_keeps_verified_destination_and_source
     target_dir = tmp_path / "dest"
     target_dir.mkdir()
     source.write_text("recoverable", encoding="utf-8")
-    original_rename = ops.os.rename
+    original_rename = ops._rename_no_replace
     original_remove = ops._remove_path
 
-    def cross_volume_once(src, dst):
+    def cross_volume_once(src, dst, source_info):
         if os.path.abspath(src) == os.path.abspath(source):
             raise OSError(errno.EXDEV, "different volume")
-        return original_rename(src, dst)
+        return original_rename(src, dst, source_info)
 
     def fail_source_removal(path):
         if os.path.abspath(path) == os.path.abspath(source):
             raise PermissionError("simulated cleanup failure")
         return original_remove(path)
 
-    monkeypatch.setattr(ops.os, "rename", cross_volume_once)
+    monkeypatch.setattr(ops, "_rename_no_replace", cross_volume_once)
     monkeypatch.setattr(ops, "_remove_path", fail_source_removal)
 
     with pytest.raises(ops.PartialOperationError, match="Destino verificado"):

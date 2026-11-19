@@ -7,8 +7,6 @@ if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
     exit 0
 fi
 [[ $# -eq 0 ]] || { printf '[ERRO] Argumentos não são aceitos: %s\n' "$*" >&2; exit 2; }
-[[ "$(id -u)" != 0 ]] || { printf '[ERRO] Não execute como root/sudo.\n' >&2; exit 1; }
-
 BIN_PATH="${HOME:?HOME is required}/.local/bin/dirnav"
 OPERATIONS_PATH="$HOME/.local/bin/dirnav_operations.py"
 RUNTIME_MODULES=(dirnav_storage.py dirnav_editor.py dirnav_features.py dirnav_modes.py)

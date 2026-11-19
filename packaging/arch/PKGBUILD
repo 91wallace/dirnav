@@ -1,16 +1,16 @@
 # Maintainer: Wallace Ghiraldelli <wgx7426@gmail.com>
 pkgname=dirnav
 pkgver=1.0.0
-pkgrel=2
+pkgrel=1
 pkgdesc="Navegador de diretorios inline ultrarrapido para terminal com busca em tempo real"
 arch=('any')
 url="https://github.com/91wallace/dirnav"
 license=('MIT')
 depends=('python')
 install=dirnav.install
-_sourcecommit=4dd9ad43476b8dbd662ed3c0377987ee4de41ff4
+_sourcecommit=9d948c3ad305226696e11e36d2aba09437a36601
 source=("$pkgname-$pkgver.tar.gz::https://github.com/91wallace/dirnav/archive/$_sourcecommit.tar.gz")
-sha256sums=('38a5a14b3ae69c84358e961a4f93efa991e85e3c4dbb7a78f48992065bc62ef2')
+sha256sums=('c7459219451b62f146599c9cb742598b93bdddd38556908c37a25ef74b6f8c24')
 
 package() {
     cd "$srcdir/dirnav-$_sourcecommit"

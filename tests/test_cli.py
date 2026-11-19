@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+from pathlib import Path
 
 import pytest
 
@@ -220,6 +221,9 @@ def test_packaging_manifests_integrity():
     with open(pkg_json_path, encoding="utf-8") as f:
         pkg = json.load(f)
     assert pkg["name"] == "dirnav"
+    cli_source = Path(os.path.join(root, "dirnav")).read_text(encoding="utf-8")
+    cli_version = re.search(r'(?m)^__version__ = "([0-9.]+)"$', cli_source)
+    assert cli_version and pkg["version"] == cli_version.group(1)
     assert "dirnav" in pkg["bin"]
     assert "dirnav_operations.py" in pkg["files"]
     assert os.path.isfile(os.path.join(root, "dirnav_operations.py"))
@@ -238,10 +242,11 @@ def test_packaging_manifests_integrity():
         srcinfo_content = f.read()
     assert "pkgname=dirnav" in pb_content
     assert "/etc/profile.d/dirnav.sh" not in pb_content
-    pkgver = re.search(r"(?m)^pkgver=([0-9.]+)$", pb_content)
+    pkgver = re.search(r"(?m)^pkgver=([A-Za-z0-9._+]+)$", pb_content)
     commit = re.search(r"(?m)^_sourcecommit=([0-9a-f]{40})$", pb_content)
     checksum = re.search(r"(?m)^sha256sums=\('([0-9a-f]{64})'\)$", pb_content)
     assert pkgver and commit and checksum
+    assert pkgver.group(1) == cli_version.group(1)
     assert f"source = dirnav-{pkgver.group(1)}.tar.gz::https://github.com/91wallace/dirnav/archive/{commit.group(1)}.tar.gz" in srcinfo_content
     assert f"sha256sums = {checksum.group(1)}" in srcinfo_content
     assert "SKIP" not in srcinfo_content

@@ -1,96 +1,80 @@
 # dirnav
 
-Interactive directory navigation for the terminal, written in Python. dirnav displays a filterable list of directories inline and lets you change the current location of your shell session.
+Interactive directory and file navigation for the terminal, written in Python. The maintained code version is `1.0.0` and shares one core across Windows, Ubuntu, and Arch Linux; shell integrations and packages are platform-specific.
 
-[Leia em português](README.md) | [Windows 1.0.1-beta.1 release](https://github.com/91wallace/dirnav/releases/tag/v1.0.1-beta.1)
-
-> **Release status:** `1.0.1-beta.1` is an experimental Windows x64 beta for selected evaluators. It is not a stable release and is not approved for general distribution or critical environments.
+[Leia em português](README.md)
 
 ## Features
 
-- Inline directory browsing without a full-screen interface.
-- Live filtering of files and directories as you type.
-- Directory tree with open/closed folder icons and indentation up to three levels.
-- Available shortcuts are listed with `dirnav --help` or `dirnav -h`; the interface has no persistent shortcut bars.
-- Enter to select, navigation between directory levels, and Esc to cancel.
-- `F5` copies the selected item to a chosen destination, with verification and explicit conflict handling.
-- `F6` moves the selected item; cross-volume moves copy and verify before removing the source.
-- The list starts with directories only. `F7` toggles between files and directories only.
-- `--all` or `-a` starts with regular, hidden, and system files visible; `F7` toggles between files and directories only.
-- `Del` asks for confirmation before deletion. Directory deletion is recursive and permanent.
-- `Enter` selects a directory for shell integration; `Tab` or `→` enters it.
-- Shell integration for changing the current location in CMD and PowerShell.
-- Python implementation using the standard library, with no external runtime dependencies for the application.
+- Inline browsing with live filtering and a directory tree.
+- Copy, move, and delete operations with confirmation and safeguards.
+- Shell integration for CMD and PowerShell on Windows and Bash/Zsh on POSIX systems.
+- Python implementation with no external runtime dependencies.
+
+## Requirements
+
+- Python 3.
+- Windows: CMD, Windows PowerShell 5.1, or PowerShell 7.
+- Ubuntu/Arch Linux: Bash or Zsh to change the current shell session's directory.
+
+## Installation
+
+### Windows
+
+From a repository checkout, run in PowerShell:
 
 ```powershell
-py -3 .\dirnav --help
-py -3 .\dirnav --all
-py -3 .\dirnav -a C:\path\to\folder
+.\install.ps1
 ```
 
-`q` remains search text and `Esc` cancels the current navigation or operation. The directory tree and file operations are under development and **not included** in the published `1.0.1-beta.1` ZIP.
+The installer configures launchers and the current user's shell profile. Restart the shell or reload the profile.
 
-See [docs/development/tui-file-operations.md](docs/development/tui-file-operations.md) for design decisions, security details, and validation status.
+### Ubuntu
 
-## Compatibility and validation status
+From a repository checkout, run:
 
-| Environment | Status |
-| --- | --- |
-| Windows x64, CMD | Included in the beta; locally tested in real `cmd.exe`. |
-| Windows PowerShell 5.1 and PowerShell 7 | Within the beta scope; temporary integration is documented. |
-| Linux and macOS | Not homologated. |
-| Bash and Zsh | In stabilization; Git Bash tests on Windows do not constitute Linux/macOS homologation. |
-| Arch/AUR, Winget, and npm | Not part of the published Windows beta; do not install these as approved packages. |
-
-The beta is not intended for critical environments. The owner reported positive external feedback, but this repository does not contain detailed reports or published metrics.
-
-## Install the Windows beta
-
-Download only the ZIP and `SHA256SUMS.txt` from the [1.0.1-beta.1 release](https://github.com/91wallace/dirnav/releases/tag/v1.0.1-beta.1). Verify the hash before extracting or running it:
-
-```powershell
-$Zip = Join-Path $HOME 'Downloads\dirnav-1.0.1-beta.1-windows-x64.zip'
-$Expected = '9fecce9624d1a81d448fe7060fcbded7a13acccff1862816e19bae31dd322077'
-$Actual = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($Actual -ne $Expected) { throw 'SHA-256 mismatch; do not run the package.' }
+```bash
+bash ./install.sh
 ```
 
-Extract the archive to a dedicated folder under your user account, for example `%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1`. To start navigation in CMD, use `call` in the same session:
+Installation is per-user under `~/.local/bin`; start a new shell or reload the Bash/Zsh profile.
 
-```cmd
-call "%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1\cc.cmd"
+### Arch Linux
+
+```bash
+cd packaging/arch
+makepkg -si
+dirnav --setup
 ```
 
-The [evaluation guide](docs/pilot/windows-beta-evaluation.md) provides CMD, Windows PowerShell 5.1, and PowerShell 7 instructions, along with a checklist for selection, cancellation, and metacharacter testing.
+The package does not modify personal profiles automatically. Run `dirnav --uninstall` to remove the integration before removing the package.
 
-### Uninstall the Windows beta
+## Usage
 
-Close the test sessions and remove only the dedicated folder you created for extraction, for example `%LOCALAPPDATA%\DirnavPilot\1.0.1-beta.1`. Verify the path before deleting it. The ZIP beta does not install services or require profile or PATH changes.
-
-## Security and path limitations
-
-- F15 adversarial testing with a second standard Windows identity was not performed. It has not been proven that another standard account cannot alter the temporary helper batch.
-- Windows has a known limitation with long paths. Avoid deeply nested directory trees.
-- Linux and macOS have not been homologated.
-- The stable Windows release remains **NO-GO** until adversarial testing and outstanding security criteria are complete.
-
-See the [F15 risk acceptance](docs/security/release-risk-acceptance.md), [release report](docs/release/publication-v1.0.1-beta.1.md), and [test matrix](docs/audit/test-matrix.md) for scope and available evidence.
-
-## Development
-
-Python 3 and `pytest` are required to run the Python tests; Ruff is used for linting.
-
-```powershell
-py -3 -m pytest -q -rs
-py -3 -m ruff check dirnav tests/
+```text
+dirnav --help
+dirnav --all
+dirnav -a /path/to/folder
 ```
 
-Shell and installer tests are in `tests/shell/`. Consult the audit documentation before interpreting simulated tests as validation of a native operating system.
+The configured shell command (`dn` by default) lets the selection update the current session's directory. `Enter` confirms a directory, `Tab` or `→` enters it, and `Esc` cancels. `F5`, `F6`, and `Del` start copy, move, and delete operations; run `dirnav --help` for all shortcuts.
 
-## Security reports and feedback
+## Development and tests
 
-Do not include tokens, credentials, full profiles, personal paths, or temporary file contents in issues. Review diagnostics and remove sensitive information before sharing. The [pilot feedback template](docs/pilot/feedback-template.md) describes useful results without automatic data collection. dirnav does not send telemetry.
+```bash
+python -m pytest tests/ -v
+ruff check dirnav dirnav_operations.py tests/
+ruff format --check dirnav dirnav_operations.py tests/
+bash ./tests/shell/test_bash.sh
+bash ./tests/shell/test_installers.sh
+```
+
+PowerShell integration tests are in `tests/shell/Dirnav.Tests.ps1`. The CMD tests require Windows; the Zsh tests require Zsh.
+
+## History
+
+Documents under `docs/pilot/`, `docs/release/`, and `docs/security/` preserve the record of the earlier Windows `1.0.1-beta.1` distribution. That is not the current code version.
 
 ## License
 
-Distributed under the [MIT License](LICENSE).
+MIT. See [LICENSE](LICENSE).
